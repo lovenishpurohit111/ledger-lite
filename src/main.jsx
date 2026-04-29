@@ -152,11 +152,11 @@ function App() {
       </aside>
 
       <main className="lg:pl-64">
-        <header className="sticky top-0 z-20 border-b border-white/70 bg-white/75 px-5 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/72 lg:px-8">
+        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-5 py-4 text-slate-950 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 dark:text-white lg:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">{page}</p>
-              <h1 className="text-2xl font-bold">LedgerLite</h1>
+              <h1 className="text-2xl font-bold text-slate-950 dark:text-white">LedgerLite</h1>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -166,9 +166,9 @@ function App() {
               >
                 {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
               </button>
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
                 <CalendarDays size={18} className="text-slate-500 dark:text-slate-400" />
-                <input value={month} onChange={(event) => setMonth(event.target.value)} type="month" className="bg-transparent outline-none" />
+                <input value={month} onChange={(event) => setMonth(event.target.value)} type="month" className="bg-transparent text-slate-900 outline-none dark:text-slate-100" />
               </label>
             </div>
           </div>
