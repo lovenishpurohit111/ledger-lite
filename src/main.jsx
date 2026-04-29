@@ -12,20 +12,42 @@ const defaultRules = [
 ];
 
 const defaultAccounts = [
-  { name: "Bank Account", type: "Asset" },
-  { name: "Cash", type: "Asset" },
+  { name: "Bank Account", type: "Current Asset" },
+  { name: "Cash", type: "Current Asset" },
+  { name: "Accounts Receivable", type: "Current Asset" },
+  { name: "Inventory", type: "Other Current Asset" },
+  { name: "Prepaid Expenses", type: "Other Current Asset" },
+  { name: "Equipment", type: "Fixed Asset" },
+  { name: "Accounts Payable", type: "Current Liability" },
+  { name: "Credit Card", type: "Current Liability" },
+  { name: "GST / Sales Tax Payable", type: "Other Current Liability" },
+  { name: "Loan Payable", type: "Long-term Liability" },
+  { name: "Owner Equity", type: "Equity" },
   { name: "Sales Income", type: "Income" },
+  { name: "Service Income", type: "Income" },
+  { name: "Cost of Goods Sold", type: "Cost of Goods Sold" },
   { name: "Rent", type: "Expense" },
   { name: "Salary", type: "Expense" },
   { name: "Travel", type: "Expense" },
   { name: "Food", type: "Expense" },
   { name: "Office Expense", type: "Expense" },
   { name: "Bank Charges", type: "Expense" },
-  { name: "Miscellaneous", type: "Expense" },
-  { name: "Owner Equity", type: "Equity" }
+  { name: "Miscellaneous", type: "Other Expense" }
 ];
 
-const accountTypes = ["Asset", "Liability", "Equity", "Income", "Expense"];
+const accountTypes = [
+  "Current Asset",
+  "Other Current Asset",
+  "Fixed Asset",
+  "Current Liability",
+  "Other Current Liability",
+  "Long-term Liability",
+  "Equity",
+  "Income",
+  "Cost of Goods Sold",
+  "Expense",
+  "Other Expense"
+];
 
 const storage = {
   get(key, fallback) {
@@ -84,8 +106,34 @@ function normalizeTransaction(transaction) {
   };
 }
 
+function mergeAccounts(savedAccounts) {
+  const saved = Array.isArray(savedAccounts) ? savedAccounts : [];
+  const normalized = saved.map((account) => ({
+    ...account,
+    type: normalizeAccountType(account.type)
+  }));
+  const names = new Set(normalized.map((account) => account.name.toLowerCase()));
+  return [...normalized, ...defaultAccounts.filter((account) => !names.has(account.name.toLowerCase()))];
+}
+
+function normalizeAccountType(type) {
+  if (type === "Asset") return "Current Asset";
+  if (type === "Liability") return "Current Liability";
+  if (type === "Expense") return "Expense";
+  return type || "Expense";
+}
+
+function accountClass(type) {
+  if (type.includes("Asset")) return "Asset";
+  if (type.includes("Liability")) return "Liability";
+  if (type === "Equity") return "Equity";
+  if (type === "Income") return "Income";
+  return "Expense";
+}
+
 function accountNormalSide(type) {
-  return type === "Asset" || type === "Expense" ? "Debit" : "Credit";
+  const classification = accountClass(type);
+  return classification === "Asset" || classification === "Expense" ? "Debit" : "Credit";
 }
 
 function accountBalance(accountName, accountType, transactions) {
@@ -107,7 +155,7 @@ function App() {
   const [transactions, setTransactions] = React.useState(() => storage.get("ledgerlite:transactions", []).map(normalizeTransaction));
   const [categories, setCategories] = React.useState(() => storage.get("ledgerlite:categories", defaultCategories));
   const [rules, setRules] = React.useState(() => storage.get("ledgerlite:rules", defaultRules));
-  const [accounts, setAccounts] = React.useState(() => storage.get("ledgerlite:accounts", defaultAccounts));
+  const [accounts, setAccounts] = React.useState(() => mergeAccounts(storage.get("ledgerlite:accounts", defaultAccounts)));
   const [accountForm, setAccountForm] = React.useState({ name: "", type: "Expense" });
   const [theme, setTheme] = React.useState(initialTheme);
 
@@ -129,6 +177,7 @@ function App() {
   const expenses = React.useMemo(() => getExpenseBreakdown(visibleTransactions, accounts), [visibleTransactions, accounts]);
   const months = React.useMemo(() => getRecentMonths(transactions), [transactions]);
   const accountBalances = React.useMemo(() => getAccountBalances(accounts, transactions), [accounts, transactions]);
+  const balanceSheet = React.useMemo(() => getBalanceSheet(accounts, transactions, month), [accounts, transactions, month]);
 
   function suggestAccount(description) {
     const text = description.toLowerCase();
@@ -157,16 +206,16 @@ function App() {
     const cleanName = accountForm.name.trim();
     if (!cleanName || accounts.some((account) => account.name.toLowerCase() === cleanName.toLowerCase())) return false;
     setAccounts((current) => [...current, { name: cleanName, type: accountForm.type }]);
-    if (accountForm.type === "Expense" && !categories.includes(cleanName)) setCategories((current) => [...current, cleanName]);
+    if (accountClass(accountForm.type) === "Expense" && !categories.includes(cleanName)) setCategories((current) => [...current, cleanName]);
     setAccountForm({ name: "", type: "Expense" });
     return true;
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f8fafc_34%,#eef2ff_100%)] text-ledger-ink transition-colors dark:bg-[radial-gradient(circle_at_top_left,#172554_0,#020617_42%,#0f172a_100%)] dark:text-slate-100">
-      <aside className="fixed inset-y-0 left-0 z-10 hidden w-64 border-r border-white/70 bg-white/82 px-5 py-6 shadow-[12px_0_35px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/82 dark:shadow-[12px_0_45px_rgba(0,0,0,0.35)] lg:block">
+    <div className="min-h-screen bg-slate-100 text-slate-950 transition-colors dark:bg-slate-950 dark:text-slate-100">
+      <aside className="fixed inset-y-0 left-0 z-10 hidden w-64 border-r border-slate-200 bg-white px-5 py-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 lg:block">
         <div className="mb-8 flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-blue-500 to-emerald-500 text-white shadow-lg shadow-blue-500/25">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-600 text-white shadow-sm">
             <CircleDollarSign size={24} />
           </div>
           <div>
@@ -186,8 +235,8 @@ function App() {
               onClick={() => setPage(label)}
               className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
                 page === label
-                  ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20"
+                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
               }`}
             >
               <Icon size={19} />
@@ -198,10 +247,10 @@ function App() {
       </aside>
 
       <main className="lg:pl-64">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-5 py-4 text-slate-950 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 dark:text-white lg:px-8">
+        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-5 py-4 text-slate-950 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-white lg:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">{page}</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">{page}</p>
               <h1 className="text-2xl font-bold text-slate-950 dark:text-white">LedgerLite</h1>
             </div>
             <div className="flex items-center gap-3">
@@ -238,7 +287,7 @@ function App() {
             />
           )}
           {page === "Chart of Accounts" && <ChartOfAccounts balances={accountBalances} accountForm={accountForm} setAccountForm={setAccountForm} addAccount={addAccount} />}
-          {page === "Reports" && <Reports totals={totals} expenses={expenses} month={month} accounts={accounts} transactions={visibleTransactions} />}
+          {page === "Reports" && <Reports totals={totals} expenses={expenses} month={month} accounts={accounts} transactions={visibleTransactions} balanceSheet={balanceSheet} />}
         </div>
       </main>
     </div>
@@ -253,7 +302,7 @@ function MobileNav({ page, setPage }) {
           key={label}
           onClick={() => setPage(label)}
           className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${
-            page === label ? "bg-blue-600 text-white" : "bg-white text-slate-600 dark:bg-slate-900 dark:text-slate-300"
+            page === label ? "bg-emerald-700 text-white" : "bg-white text-slate-600 dark:bg-slate-900 dark:text-slate-300"
           }`}
         >
           {label}
@@ -279,8 +328,8 @@ function Dashboard({ totals, expenses, months, currentMonth, transactions, accou
             {months.map((month, index) => (
               <div key={month} className="flex flex-1 flex-col items-center gap-3">
                 <div className="flex h-56 w-full items-end justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50/80 px-2 pb-2 dark:border-slate-800 dark:bg-slate-950/70">
-                  <div className="w-5 rounded-t-lg bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-lg shadow-emerald-500/20" style={{ height: `${(monthlyTotals[index].income / peak) * 100}%` }} />
-                  <div className="w-5 rounded-t-lg bg-gradient-to-t from-rose-600 to-rose-400 shadow-lg shadow-rose-500/20" style={{ height: `${(monthlyTotals[index].expenses / peak) * 100}%` }} />
+                  <div className="w-5 rounded-t-lg bg-emerald-600" style={{ height: `${(monthlyTotals[index].income / peak) * 100}%` }} />
+                  <div className="w-5 rounded-t-lg bg-slate-400 dark:bg-slate-500" style={{ height: `${(monthlyTotals[index].expenses / peak) * 100}%` }} />
                 </div>
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{monthLabel(month).slice(0, 3)}</span>
               </div>
@@ -312,7 +361,7 @@ function Transactions({ month, transactions, accounts, accountForm, setAccountFo
                 <option key={type}>{type}</option>
               ))}
             </select>
-            <button className="icon-button bg-blue-600 text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700" title="Add category">
+            <button className="icon-button bg-emerald-700 text-white shadow-sm transition hover:bg-emerald-800" title="Add account">
               <Plus size={18} />
             </button>
           </form>
@@ -364,11 +413,11 @@ function ChartOfAccounts({ balances, accountForm, setAccountForm, addAccount }) 
               <option key={type}>{type}</option>
             ))}
           </select>
-          <button className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:shadow-xl">
+          <button className="w-full rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-emerald-800">
             Add Account
           </button>
         </form>
-        <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-slate-300">
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
           Assets and expenses normally increase with debits. Income, liabilities, and equity normally increase with credits.
         </div>
       </Card>
@@ -376,7 +425,7 @@ function ChartOfAccounts({ balances, accountForm, setAccountForm, addAccount }) 
   );
 }
 
-function Reports({ totals, expenses, month, accounts, transactions }) {
+function Reports({ totals, expenses, month, accounts, transactions, balanceSheet }) {
   const balances = getAccountBalances(accounts, transactions);
   return (
     <section className="space-y-6">
@@ -385,12 +434,20 @@ function Reports({ totals, expenses, month, accounts, transactions }) {
         <Card title="Profit & Loss" subtitle={monthLabel(month)}>
           <ReportRow label="Total Income" value={totals.income} positive />
           <ReportRow label="Total Expenses" value={totals.expenses} />
-          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+          <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
             <ReportRow label="Net Profit" value={totals.net} strong positive={totals.net >= 0} />
           </div>
         </Card>
-        <Card title="Expense Breakdown" subtitle="Grouped by category">
+        <Card title="Balance Sheet" subtitle={`As of ${monthLabel(month)}`}>
+          <BalanceSheetSummary balanceSheet={balanceSheet} />
+        </Card>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card title="Expense Breakdown" subtitle="Grouped by account">
           <Breakdown expenses={expenses} />
+        </Card>
+        <Card title="Balance Sheet Detail" subtitle="Assets, liabilities, and equity">
+          <BalanceSheetDetail balanceSheet={balanceSheet} />
         </Card>
       </div>
       <Card title="Account Movement" subtitle="Debit and credit impact for selected month">
@@ -410,10 +467,56 @@ function Reports({ totals, expenses, month, accounts, transactions }) {
   );
 }
 
+function BalanceSheetSummary({ balanceSheet }) {
+  const difference = balanceSheet.assets.total - (balanceSheet.liabilities.total + balanceSheet.equity.total);
+  return (
+    <div className="space-y-3">
+      <ReportRow label="Total Assets" value={balanceSheet.assets.total} positive />
+      <ReportRow label="Total Liabilities" value={balanceSheet.liabilities.total} />
+      <ReportRow label="Total Equity" value={balanceSheet.equity.total} positive />
+      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950/40">
+        <ReportRow label="Difference" value={difference} strong positive={Math.abs(difference) < 1} />
+      </div>
+    </div>
+  );
+}
+
+function BalanceSheetDetail({ balanceSheet }) {
+  return (
+    <div className="space-y-5">
+      <BalanceSection title="Assets" groups={balanceSheet.assets.groups} total={balanceSheet.assets.total} />
+      <BalanceSection title="Liabilities" groups={balanceSheet.liabilities.groups} total={balanceSheet.liabilities.total} />
+      <BalanceSection title="Equity" groups={balanceSheet.equity.groups} total={balanceSheet.equity.total} />
+    </div>
+  );
+}
+
+function BalanceSection({ title, groups, total }) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between border-b border-slate-200 pb-2 text-sm font-bold dark:border-slate-800">
+        <span>{title}</span>
+        <span>{formatMoney(total)}</span>
+      </div>
+      {Object.entries(groups).map(([group, accounts]) => (
+        <div key={group} className="mb-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{group}</p>
+          {accounts.map((account) => (
+            <div key={account.name} className="flex justify-between py-1 text-sm">
+              <span>{account.name}</span>
+              <span className="font-semibold">{formatMoney(account.balance)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TransactionForm({ accounts, addTransaction, suggestAccount }) {
-  const assetAccounts = accounts.filter((account) => account.type === "Asset");
-  const incomeAccounts = accounts.filter((account) => account.type === "Income");
-  const expenseAccounts = accounts.filter((account) => account.type === "Expense");
+  const assetAccounts = accounts.filter((account) => accountClass(account.type) === "Asset");
+  const incomeAccounts = accounts.filter((account) => accountClass(account.type) === "Income");
+  const expenseAccounts = accounts.filter((account) => accountClass(account.type) === "Expense");
   const [form, setForm] = React.useState({
     date: today(),
     amount: "",
@@ -497,7 +600,7 @@ function TransactionForm({ accounts, addTransaction, suggestAccount }) {
             <option key={account.name}>{account.name}</option>
           ))}
         </select>
-        <button className="rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:shadow-xl">Add</button>
+        <button className="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-emerald-800">Add</button>
       </form>
       <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
         {form.type === "Expense" ? `Debit ${form.debitAccount}, credit ${form.creditAccount}.` : `Debit ${form.debitAccount}, credit ${form.creditAccount}.`}
@@ -527,7 +630,7 @@ function MetricCard({ title, value, tone, icon: Icon }) {
   const toneClass = {
     green: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-300",
     red: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
-    blue: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+    blue: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100"
   }[tone];
   return (
     <div className="premium-card p-5 transition hover:-translate-y-1 hover:shadow-[0_24px_60px_rgba(37,99,235,0.12)] dark:hover:shadow-[0_24px_60px_rgba(0,0,0,0.5)]">
@@ -564,14 +667,14 @@ function TransactionTable({ transactions, accounts, updateTransactionAccount, de
               <td className="px-4 py-3 font-medium">{transaction.description}</td>
               <td className={`px-4 py-3 font-semibold ${accountType(transaction.creditAccount, accounts) === "Income" ? "text-green-600 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{formatMoney(transaction.amount)}</td>
               <td className="px-4 py-3">
-                <select value={transaction.debitAccount} onChange={(event) => updateTransactionAccount(transaction.id, "debitAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                <select value={transaction.debitAccount} onChange={(event) => updateTransactionAccount(transaction.id, "debitAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
                   {accounts.map((account) => (
                     <option key={account.name}>{account.name}</option>
                   ))}
                 </select>
               </td>
               <td className="px-4 py-3">
-                <select value={transaction.creditAccount} onChange={(event) => updateTransactionAccount(transaction.id, "creditAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                <select value={transaction.creditAccount} onChange={(event) => updateTransactionAccount(transaction.id, "creditAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
                   {accounts.map((account) => (
                     <option key={account.name}>{account.name}</option>
                   ))}
@@ -614,7 +717,7 @@ function Breakdown({ expenses }) {
             <span className="font-semibold text-slate-600 dark:text-slate-300">{formatMoney(item.total)}</span>
           </div>
           <div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800">
-            <div className="h-3 rounded-full bg-gradient-to-r from-blue-600 to-emerald-500 shadow-sm shadow-blue-500/30" style={{ width: `${(item.total / peak) * 100}%` }} />
+            <div className="h-3 rounded-full bg-emerald-700" style={{ width: `${(item.total / peak) * 100}%` }} />
           </div>
         </div>
       ))}
@@ -644,7 +747,7 @@ function getTotals(transactions, accounts = defaultAccounts) {
   return transactions.reduce(
     (totals, transaction) => {
       const amount = Math.abs(Number(transaction.amount) || 0);
-      if (accountType(transaction.creditAccount, accounts) === "Income") totals.income += amount;
+      if (accountClass(accountType(transaction.creditAccount, accounts)) === "Income") totals.income += amount;
       else totals.expenses += amount;
       totals.net = totals.income - totals.expenses;
       return totals;
@@ -655,7 +758,7 @@ function getTotals(transactions, accounts = defaultAccounts) {
 
 function getExpenseBreakdown(transactions, accounts = defaultAccounts) {
   const groups = transactions.reduce((map, transaction) => {
-    if (accountType(transaction.debitAccount, accounts) !== "Expense") return map;
+    if (accountClass(accountType(transaction.debitAccount, accounts)) !== "Expense") return map;
     map[transaction.debitAccount] = (map[transaction.debitAccount] || 0) + Math.abs(Number(transaction.amount) || 0);
     return map;
   }, {});
@@ -675,6 +778,45 @@ function getAccountBalances(accounts, transactions) {
     ...account,
     balance: accountBalance(account.name, account.type, transactions)
   }));
+}
+
+function monthEndDate(month) {
+  const [year, value] = month.split("-").map(Number);
+  return new Date(year, value, 0).toISOString().slice(0, 10);
+}
+
+function getBalanceSheet(accounts, transactions, month) {
+  const asOf = monthEndDate(month);
+  const included = transactions.filter((transaction) => transaction.date <= asOf);
+  const balances = getAccountBalances(accounts, included);
+  const profit = getTotals(included, accounts).net;
+
+  const sections = {
+    assets: buildBalanceSection(balances, "Asset"),
+    liabilities: buildBalanceSection(balances, "Liability"),
+    equity: buildBalanceSection(
+      [
+        ...balances.filter((account) => accountClass(account.type) === "Equity"),
+        { name: "Retained Earnings", type: "Equity", balance: profit }
+      ],
+      "Equity"
+    )
+  };
+
+  return sections;
+}
+
+function buildBalanceSection(balances, classification) {
+  const filtered = balances.filter((account) => accountClass(account.type) === classification && account.balance !== 0);
+  const groups = filtered.reduce((current, account) => {
+    current[account.type] = current[account.type] || [];
+    current[account.type].push(account);
+    return current;
+  }, {});
+  return {
+    groups,
+    total: filtered.reduce((sum, account) => sum + account.balance, 0)
+  };
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

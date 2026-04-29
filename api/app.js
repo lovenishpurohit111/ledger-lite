@@ -20,17 +20,27 @@ export const defaultRules = [
 ];
 
 export const defaultAccounts = [
-  { name: "Bank Account", type: "Asset" },
-  { name: "Cash", type: "Asset" },
+  { name: "Bank Account", type: "Current Asset" },
+  { name: "Cash", type: "Current Asset" },
+  { name: "Accounts Receivable", type: "Current Asset" },
+  { name: "Inventory", type: "Other Current Asset" },
+  { name: "Prepaid Expenses", type: "Other Current Asset" },
+  { name: "Equipment", type: "Fixed Asset" },
+  { name: "Accounts Payable", type: "Current Liability" },
+  { name: "Credit Card", type: "Current Liability" },
+  { name: "GST / Sales Tax Payable", type: "Other Current Liability" },
+  { name: "Loan Payable", type: "Long-term Liability" },
+  { name: "Owner Equity", type: "Equity" },
   { name: "Sales Income", type: "Income" },
+  { name: "Service Income", type: "Income" },
+  { name: "Cost of Goods Sold", type: "Cost of Goods Sold" },
   { name: "Rent", type: "Expense" },
   { name: "Salary", type: "Expense" },
   { name: "Travel", type: "Expense" },
   { name: "Food", type: "Expense" },
   { name: "Office Expense", type: "Expense" },
   { name: "Bank Charges", type: "Expense" },
-  { name: "Miscellaneous", type: "Expense" },
-  { name: "Owner Equity", type: "Equity" }
+  { name: "Miscellaneous", type: "Other Expense" }
 ];
 
 export function createApp() {
