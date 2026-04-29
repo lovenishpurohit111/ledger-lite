@@ -3,6 +3,14 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   body {
     margin: 0;
     font-family: Inter, ui-sans-serif, system-ui, sans-serif;
@@ -11,10 +19,14 @@
 
 @layer components {
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100;
+    @apply w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-500/20;
   }
 
   .icon-button {
     @apply inline-grid h-11 w-11 place-items-center rounded-xl transition;
+  }
+
+  .premium-card {
+    @apply rounded-xl border border-white/70 bg-white/90 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/80 dark:shadow-[0_18px_55px_rgba(0,0,0,0.38)];
   }
 }
