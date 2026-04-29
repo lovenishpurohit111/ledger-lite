@@ -1,15 +1,31 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ArrowDownCircle, ArrowUpCircle, BarChart3, CalendarDays, CircleDollarSign, LayoutDashboard, Moon, Plus, ReceiptText, Search, Sun, Trash2 } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, BarChart3, CalendarDays, CircleDollarSign, Landmark, LayoutDashboard, Moon, Plus, ReceiptText, Search, Sun, Trash2 } from "lucide-react";
 import "./styles.css";
 
 const defaultCategories = ["Income", "Rent", "Salary", "Travel", "Food", "Office Expense", "Bank Charges", "Miscellaneous"];
 const defaultRules = [
-  { keyword: "uber", category: "Travel" },
-  { keyword: "zomato", category: "Food" },
-  { keyword: "swiggy", category: "Food" },
-  { keyword: "amazon", category: "Office Expense" }
+  { keyword: "uber", account: "Travel" },
+  { keyword: "zomato", account: "Food" },
+  { keyword: "swiggy", account: "Food" },
+  { keyword: "amazon", account: "Office Expense" }
 ];
+
+const defaultAccounts = [
+  { name: "Bank Account", type: "Asset" },
+  { name: "Cash", type: "Asset" },
+  { name: "Sales Income", type: "Income" },
+  { name: "Rent", type: "Expense" },
+  { name: "Salary", type: "Expense" },
+  { name: "Travel", type: "Expense" },
+  { name: "Food", type: "Expense" },
+  { name: "Office Expense", type: "Expense" },
+  { name: "Bank Charges", type: "Expense" },
+  { name: "Miscellaneous", type: "Expense" },
+  { name: "Owner Equity", type: "Equity" }
+];
+
+const accountTypes = ["Asset", "Liability", "Equity", "Income", "Expense"];
 
 const storage = {
   get(key, fallback) {
@@ -56,23 +72,49 @@ function formatMoney(value) {
   }).format(value);
 }
 
-function signedAmount(transaction) {
+function normalizeTransaction(transaction) {
+  if (transaction.debitAccount && transaction.creditAccount) return transaction;
   const amount = Math.abs(Number(transaction.amount) || 0);
-  return transaction.category === "Income" ? amount : -amount;
+  const isIncome = transaction.category === "Income";
+  return {
+    ...transaction,
+    amount,
+    debitAccount: isIncome ? "Bank Account" : transaction.category || "Miscellaneous",
+    creditAccount: isIncome ? "Sales Income" : "Bank Account"
+  };
+}
+
+function accountNormalSide(type) {
+  return type === "Asset" || type === "Expense" ? "Debit" : "Credit";
+}
+
+function accountBalance(accountName, accountType, transactions) {
+  return transactions.reduce((balance, transaction) => {
+    const amount = Math.abs(Number(transaction.amount) || 0);
+    const debit = transaction.debitAccount === accountName ? amount : 0;
+    const credit = transaction.creditAccount === accountName ? amount : 0;
+    return accountNormalSide(accountType) === "Debit" ? balance + debit - credit : balance + credit - debit;
+  }, 0);
+}
+
+function accountType(name, accounts) {
+  return accounts.find((account) => account.name === name)?.type || "Expense";
 }
 
 function App() {
   const [page, setPage] = React.useState("Dashboard");
   const [month, setMonth] = React.useState(monthKey());
-  const [transactions, setTransactions] = React.useState(() => storage.get("ledgerlite:transactions", []));
+  const [transactions, setTransactions] = React.useState(() => storage.get("ledgerlite:transactions", []).map(normalizeTransaction));
   const [categories, setCategories] = React.useState(() => storage.get("ledgerlite:categories", defaultCategories));
   const [rules, setRules] = React.useState(() => storage.get("ledgerlite:rules", defaultRules));
-  const [categoryName, setCategoryName] = React.useState("");
+  const [accounts, setAccounts] = React.useState(() => storage.get("ledgerlite:accounts", defaultAccounts));
+  const [accountForm, setAccountForm] = React.useState({ name: "", type: "Expense" });
   const [theme, setTheme] = React.useState(initialTheme);
 
   React.useEffect(() => storage.set("ledgerlite:transactions", transactions), [transactions]);
   React.useEffect(() => storage.set("ledgerlite:categories", categories), [categories]);
   React.useEffect(() => storage.set("ledgerlite:rules", rules), [rules]);
+  React.useEffect(() => storage.set("ledgerlite:accounts", accounts), [accounts]);
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     storage.set("ledgerlite:theme", theme);
@@ -83,38 +125,41 @@ function App() {
     [transactions, month]
   );
 
-  const totals = React.useMemo(() => getTotals(visibleTransactions), [visibleTransactions]);
-  const expenses = React.useMemo(() => getExpenseBreakdown(visibleTransactions), [visibleTransactions]);
+  const totals = React.useMemo(() => getTotals(visibleTransactions, accounts), [visibleTransactions, accounts]);
+  const expenses = React.useMemo(() => getExpenseBreakdown(visibleTransactions, accounts), [visibleTransactions, accounts]);
   const months = React.useMemo(() => getRecentMonths(transactions), [transactions]);
+  const accountBalances = React.useMemo(() => getAccountBalances(accounts, transactions), [accounts, transactions]);
 
-  function suggestCategory(description) {
+  function suggestAccount(description) {
     const text = description.toLowerCase();
-    return rules.find((rule) => text.includes(rule.keyword.toLowerCase()))?.category || "Miscellaneous";
+    return rules.find((rule) => text.includes(rule.keyword.toLowerCase()))?.account || rules.find((rule) => text.includes(rule.keyword.toLowerCase()))?.category || "Miscellaneous";
   }
 
   function addTransaction(transaction) {
     setTransactions((current) => [{ ...transaction, id: crypto.randomUUID() }, ...current]);
     const words = transaction.description.toLowerCase().split(/\s+/).filter(Boolean);
     const keyword = words[0];
-    if (keyword && !rules.some((rule) => rule.keyword === keyword) && transaction.category !== "Miscellaneous") {
-      setRules((current) => [...current, { keyword, category: transaction.category }]);
+    if (keyword && !rules.some((rule) => rule.keyword === keyword) && transaction.debitAccount !== "Miscellaneous") {
+      setRules((current) => [...current, { keyword, account: transaction.debitAccount }]);
     }
   }
 
-  function updateCategory(id, category) {
-    setTransactions((current) => current.map((transaction) => (transaction.id === id ? { ...transaction, category } : transaction)));
+  function updateTransactionAccount(id, field, account) {
+    setTransactions((current) => current.map((transaction) => (transaction.id === id ? { ...transaction, [field]: account } : transaction)));
   }
 
   function deleteTransaction(id) {
     setTransactions((current) => current.filter((transaction) => transaction.id !== id));
   }
 
-  function addCategory(event) {
-    event.preventDefault();
-    const cleanName = categoryName.trim();
-    if (!cleanName || categories.includes(cleanName)) return;
-    setCategories((current) => [...current, cleanName]);
-    setCategoryName("");
+  function addAccount(event) {
+    event?.preventDefault();
+    const cleanName = accountForm.name.trim();
+    if (!cleanName || accounts.some((account) => account.name.toLowerCase() === cleanName.toLowerCase())) return false;
+    setAccounts((current) => [...current, { name: cleanName, type: accountForm.type }]);
+    if (accountForm.type === "Expense" && !categories.includes(cleanName)) setCategories((current) => [...current, cleanName]);
+    setAccountForm({ name: "", type: "Expense" });
+    return true;
   }
 
   return (
@@ -133,6 +178,7 @@ function App() {
           {[
             ["Dashboard", LayoutDashboard],
             ["Transactions", ReceiptText],
+            ["Chart of Accounts", Landmark],
             ["Reports", BarChart3]
           ].map(([label, Icon]) => (
             <button
@@ -176,22 +222,23 @@ function App() {
 
         <div className="px-5 py-6 lg:px-8">
           <MobileNav page={page} setPage={setPage} />
-          {page === "Dashboard" && <Dashboard totals={totals} expenses={expenses} months={months} currentMonth={month} transactions={transactions} />}
+          {page === "Dashboard" && <Dashboard totals={totals} expenses={expenses} months={months} currentMonth={month} transactions={transactions} accounts={accounts} />}
           {page === "Transactions" && (
             <Transactions
               month={month}
               transactions={visibleTransactions}
-              categories={categories}
-              categoryName={categoryName}
-              setCategoryName={setCategoryName}
-              addCategory={addCategory}
+              accounts={accounts}
+              accountForm={accountForm}
+              setAccountForm={setAccountForm}
+              addAccount={addAccount}
               addTransaction={addTransaction}
-              updateCategory={updateCategory}
+              updateTransactionAccount={updateTransactionAccount}
               deleteTransaction={deleteTransaction}
-              suggestCategory={suggestCategory}
+              suggestAccount={suggestAccount}
             />
           )}
-          {page === "Reports" && <Reports totals={totals} expenses={expenses} month={month} />}
+          {page === "Chart of Accounts" && <ChartOfAccounts balances={accountBalances} accountForm={accountForm} setAccountForm={setAccountForm} addAccount={addAccount} />}
+          {page === "Reports" && <Reports totals={totals} expenses={expenses} month={month} accounts={accounts} transactions={visibleTransactions} />}
         </div>
       </main>
     </div>
@@ -200,8 +247,8 @@ function App() {
 
 function MobileNav({ page, setPage }) {
   return (
-    <div className="mb-5 grid grid-cols-3 gap-2 lg:hidden">
-      {["Dashboard", "Transactions", "Reports"].map((label) => (
+    <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:hidden">
+      {["Dashboard", "Transactions", "Chart of Accounts", "Reports"].map((label) => (
         <button
           key={label}
           onClick={() => setPage(label)}
@@ -216,8 +263,8 @@ function MobileNav({ page, setPage }) {
   );
 }
 
-function Dashboard({ totals, expenses, months, currentMonth, transactions }) {
-  const monthlyTotals = months.map((month) => getTotals(transactions.filter((transaction) => transaction.date.startsWith(month))));
+function Dashboard({ totals, expenses, months, currentMonth, transactions, accounts }) {
+  const monthlyTotals = months.map((month) => getTotals(transactions.filter((transaction) => transaction.date.startsWith(month)), accounts));
   const peak = Math.max(...monthlyTotals.map((item) => Math.max(item.income, item.expenses)), 1);
 
   return (
@@ -245,29 +292,34 @@ function Dashboard({ totals, expenses, months, currentMonth, transactions }) {
   );
 }
 
-function Transactions({ month, transactions, categories, categoryName, setCategoryName, addCategory, addTransaction, updateCategory, deleteTransaction, suggestCategory }) {
+function Transactions({ month, transactions, accounts, accountForm, setAccountForm, addAccount, addTransaction, updateTransactionAccount, deleteTransaction, suggestAccount }) {
   return (
     <section className="space-y-6">
-      <TransactionForm categories={categories} addTransaction={addTransaction} suggestCategory={suggestCategory} />
+      <TransactionForm accounts={accounts} addTransaction={addTransaction} suggestAccount={suggestAccount} />
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
         <Card title="Transactions" subtitle={`${transactions.length} entries for ${monthLabel(month)}`}>
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-slate-500 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-400">
             <Search size={18} />
-            <span className="text-sm">Filtered by selected month</span>
+            <span className="text-sm">Every row posts equal debit and credit entries</span>
           </div>
-          <TransactionTable transactions={transactions} categories={categories} updateCategory={updateCategory} deleteTransaction={deleteTransaction} />
+          <TransactionTable transactions={transactions} accounts={accounts} updateTransactionAccount={updateTransactionAccount} deleteTransaction={deleteTransaction} />
         </Card>
-        <Card title="Categories" subtitle="Add your own labels">
-          <form onSubmit={addCategory} className="flex gap-2">
-            <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} placeholder="New category" className="input" />
+        <Card title="Create Account" subtitle="Add it if it is not available">
+          <form onSubmit={addAccount} className="space-y-3">
+            <input value={accountForm.name} onChange={(event) => setAccountForm((current) => ({ ...current, name: event.target.value }))} placeholder="Account name" className="input" />
+            <select value={accountForm.type} onChange={(event) => setAccountForm((current) => ({ ...current, type: event.target.value }))} className="input">
+              {accountTypes.map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
             <button className="icon-button bg-blue-600 text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700" title="Add category">
               <Plus size={18} />
             </button>
           </form>
           <div className="mt-4 flex flex-wrap gap-2">
-            {categories.map((category) => (
-              <span key={category} className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                {category}
+            {accounts.slice(0, 8).map((account) => (
+              <span key={account.name} className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {account.name}
               </span>
             ))}
           </div>
@@ -277,7 +329,55 @@ function Transactions({ month, transactions, categories, categoryName, setCatego
   );
 }
 
-function Reports({ totals, expenses, month }) {
+function ChartOfAccounts({ balances, accountForm, setAccountForm, addAccount }) {
+  return (
+    <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <Card title="Chart of Accounts" subtitle="Accounts used for debit and credit postings">
+        <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+          <table className="w-full min-w-[680px] text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500 dark:bg-slate-950/70 dark:text-slate-400">
+              <tr>
+                <th className="px-4 py-3 font-semibold">Account</th>
+                <th className="px-4 py-3 font-semibold">Type</th>
+                <th className="px-4 py-3 font-semibold">Normal Side</th>
+                <th className="px-4 py-3 text-right font-semibold">Balance</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-800 dark:bg-slate-900/40">
+              {balances.map((account) => (
+                <tr key={account.name} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                  <td className="px-4 py-3 font-semibold">{account.name}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{account.type}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{accountNormalSide(account.type)}</td>
+                  <td className="px-4 py-3 text-right font-bold">{formatMoney(account.balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <Card title="New Account" subtitle="Create the account if it is missing">
+        <form onSubmit={addAccount} className="space-y-3">
+          <input value={accountForm.name} onChange={(event) => setAccountForm((current) => ({ ...current, name: event.target.value }))} placeholder="Account name, e.g. HDFC Bank" className="input" />
+          <select value={accountForm.type} onChange={(event) => setAccountForm((current) => ({ ...current, type: event.target.value }))} className="input">
+            {accountTypes.map((type) => (
+              <option key={type}>{type}</option>
+            ))}
+          </select>
+          <button className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:shadow-xl">
+            Add Account
+          </button>
+        </form>
+        <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-slate-300">
+          Assets and expenses normally increase with debits. Income, liabilities, and equity normally increase with credits.
+        </div>
+      </Card>
+    </section>
+  );
+}
+
+function Reports({ totals, expenses, month, accounts, transactions }) {
+  const balances = getAccountBalances(accounts, transactions);
   return (
     <section className="space-y-6">
       <SummaryCards totals={totals} />
@@ -293,12 +393,35 @@ function Reports({ totals, expenses, month }) {
           <Breakdown expenses={expenses} />
         </Card>
       </div>
+      <Card title="Account Movement" subtitle="Debit and credit impact for selected month">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {balances
+            .filter((account) => account.balance !== 0)
+            .map((account) => (
+              <div key={account.name} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-950/40">
+                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{account.type}</p>
+                <p className="mt-1 font-bold">{account.name}</p>
+                <p className="mt-3 text-xl font-bold">{formatMoney(account.balance)}</p>
+              </div>
+            ))}
+        </div>
+      </Card>
     </section>
   );
 }
 
-function TransactionForm({ categories, addTransaction, suggestCategory }) {
-  const [form, setForm] = React.useState({ date: today(), amount: "", description: "", category: "Miscellaneous" });
+function TransactionForm({ accounts, addTransaction, suggestAccount }) {
+  const assetAccounts = accounts.filter((account) => account.type === "Asset");
+  const incomeAccounts = accounts.filter((account) => account.type === "Income");
+  const expenseAccounts = accounts.filter((account) => account.type === "Expense");
+  const [form, setForm] = React.useState({
+    date: today(),
+    amount: "",
+    description: "",
+    type: "Expense",
+    debitAccount: "Miscellaneous",
+    creditAccount: "Bank Account"
+  });
   const [bulkText, setBulkText] = React.useState("");
   const [error, setError] = React.useState("");
   const amountRef = React.useRef(null);
@@ -307,7 +430,15 @@ function TransactionForm({ categories, addTransaction, suggestCategory }) {
 
   function update(field, value) {
     const next = { ...form, [field]: value };
-    if (field === "description") next.category = suggestCategory(value);
+    if (field === "description" && form.type === "Expense") next.debitAccount = suggestAccount(value);
+    if (field === "type" && value === "Income") {
+      next.debitAccount = assetAccounts[0]?.name || "Bank Account";
+      next.creditAccount = incomeAccounts[0]?.name || "Sales Income";
+    }
+    if (field === "type" && value === "Expense") {
+      next.debitAccount = suggestAccount(form.description) || expenseAccounts[0]?.name || "Miscellaneous";
+      next.creditAccount = assetAccounts[0]?.name || "Bank Account";
+    }
     setForm(next);
   }
 
@@ -315,8 +446,9 @@ function TransactionForm({ categories, addTransaction, suggestCategory }) {
     event.preventDefault();
     if (!Number(form.amount) || Number(form.amount) <= 0) return setError("Enter a valid amount.");
     if (!form.description.trim()) return setError("Add a short description.");
-    addTransaction({ ...form, amount: Number(form.amount), description: form.description.trim() });
-    setForm({ date: today(), amount: "", description: "", category: "Miscellaneous" });
+    if (form.debitAccount === form.creditAccount) return setError("Debit and credit accounts must be different.");
+    addTransaction({ ...form, amount: Number(form.amount), description: form.description.trim(), category: form.type === "Income" ? "Income" : form.debitAccount });
+    setForm({ date: today(), amount: "", description: "", type: "Expense", debitAccount: "Miscellaneous", creditAccount: assetAccounts[0]?.name || "Bank Account" });
     setError("");
     amountRef.current?.focus();
   }
@@ -334,7 +466,10 @@ function TransactionForm({ categories, addTransaction, suggestCategory }) {
           date: today(),
           amount: Math.abs(Number(match[2])),
           description,
-          category: suggestCategory(description)
+          type: "Expense",
+          debitAccount: suggestAccount(description),
+          creditAccount: assetAccounts[0]?.name || "Bank Account",
+          category: suggestAccount(description)
         };
       })
       .filter(Boolean);
@@ -344,17 +479,29 @@ function TransactionForm({ categories, addTransaction, suggestCategory }) {
 
   return (
     <Card title="Quick Entry" subtitle="Press Enter to save">
-      <form onSubmit={submit} className="grid gap-3 lg:grid-cols-[150px_150px_1fr_190px_auto]">
+      <form onSubmit={submit} className="grid gap-3 xl:grid-cols-[130px_150px_150px_1fr_190px_190px_auto]">
         <input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} className="input" />
+        <select value={form.type} onChange={(event) => update("type", event.target.value)} className="input">
+          <option>Expense</option>
+          <option>Income</option>
+        </select>
         <input ref={amountRef} type="number" min="0" step="0.01" value={form.amount} onChange={(event) => update("amount", event.target.value)} placeholder="Amount" className="input" />
         <input value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Description, e.g. Uber ride" className="input" />
-        <select value={form.category} onChange={(event) => update("category", event.target.value)} className="input">
-          {categories.map((category) => (
-            <option key={category}>{category}</option>
+        <select value={form.debitAccount} onChange={(event) => update("debitAccount", event.target.value)} className="input" title="Debit account">
+          {(form.type === "Income" ? assetAccounts : expenseAccounts).map((account) => (
+            <option key={account.name}>{account.name}</option>
+          ))}
+        </select>
+        <select value={form.creditAccount} onChange={(event) => update("creditAccount", event.target.value)} className="input" title="Credit account">
+          {(form.type === "Income" ? incomeAccounts : assetAccounts).map((account) => (
+            <option key={account.name}>{account.name}</option>
           ))}
         </select>
         <button className="rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:shadow-xl">Add</button>
       </form>
+      <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+        {form.type === "Expense" ? `Debit ${form.debitAccount}, credit ${form.creditAccount}.` : `Debit ${form.debitAccount}, credit ${form.creditAccount}.`}
+      </p>
       {error && <p className="mt-3 text-sm font-medium text-red-600 dark:text-red-300">{error}</p>}
       <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
         <textarea value={bulkText} onChange={(event) => setBulkText(event.target.value)} placeholder={"Bulk paste: Uber 200\nZomato 300\nRent 10000"} className="input min-h-24 resize-y" />
@@ -395,17 +542,18 @@ function MetricCard({ title, value, tone, icon: Icon }) {
   );
 }
 
-function TransactionTable({ transactions, categories, updateCategory, deleteTransaction }) {
+function TransactionTable({ transactions, accounts, updateTransactionAccount, deleteTransaction }) {
   if (!transactions.length) return <EmptyState />;
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
-      <table className="w-full min-w-[680px] text-left text-sm">
+      <table className="w-full min-w-[840px] text-left text-sm">
         <thead className="bg-slate-50 text-slate-500 dark:bg-slate-950/70 dark:text-slate-400">
           <tr>
             <th className="px-4 py-3 font-semibold">Date</th>
             <th className="px-4 py-3 font-semibold">Description</th>
             <th className="px-4 py-3 font-semibold">Amount</th>
-            <th className="px-4 py-3 font-semibold">Category</th>
+            <th className="px-4 py-3 font-semibold">Debit</th>
+            <th className="px-4 py-3 font-semibold">Credit</th>
             <th className="px-4 py-3" />
           </tr>
         </thead>
@@ -414,11 +562,18 @@ function TransactionTable({ transactions, categories, updateCategory, deleteTran
             <tr key={transaction.id} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/60">
               <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{transaction.date}</td>
               <td className="px-4 py-3 font-medium">{transaction.description}</td>
-              <td className={`px-4 py-3 font-semibold ${transaction.category === "Income" ? "text-green-600 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{formatMoney(transaction.amount)}</td>
+              <td className={`px-4 py-3 font-semibold ${accountType(transaction.creditAccount, accounts) === "Income" ? "text-green-600 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{formatMoney(transaction.amount)}</td>
               <td className="px-4 py-3">
-                <select value={transaction.category} onChange={(event) => updateCategory(transaction.id, event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
-                  {categories.map((category) => (
-                    <option key={category}>{category}</option>
+                <select value={transaction.debitAccount} onChange={(event) => updateTransactionAccount(transaction.id, "debitAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                  {accounts.map((account) => (
+                    <option key={account.name}>{account.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td className="px-4 py-3">
+                <select value={transaction.creditAccount} onChange={(event) => updateTransactionAccount(transaction.id, "creditAccount", event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                  {accounts.map((account) => (
+                    <option key={account.name}>{account.name}</option>
                   ))}
                 </select>
               </td>
@@ -485,11 +640,11 @@ function EmptyState() {
   );
 }
 
-function getTotals(transactions) {
+function getTotals(transactions, accounts = defaultAccounts) {
   return transactions.reduce(
     (totals, transaction) => {
       const amount = Math.abs(Number(transaction.amount) || 0);
-      if (transaction.category === "Income") totals.income += amount;
+      if (accountType(transaction.creditAccount, accounts) === "Income") totals.income += amount;
       else totals.expenses += amount;
       totals.net = totals.income - totals.expenses;
       return totals;
@@ -498,10 +653,10 @@ function getTotals(transactions) {
   );
 }
 
-function getExpenseBreakdown(transactions) {
+function getExpenseBreakdown(transactions, accounts = defaultAccounts) {
   const groups = transactions.reduce((map, transaction) => {
-    if (signedAmount(transaction) >= 0) return map;
-    map[transaction.category] = (map[transaction.category] || 0) + Math.abs(Number(transaction.amount) || 0);
+    if (accountType(transaction.debitAccount, accounts) !== "Expense") return map;
+    map[transaction.debitAccount] = (map[transaction.debitAccount] || 0) + Math.abs(Number(transaction.amount) || 0);
     return map;
   }, {});
   return Object.entries(groups)
@@ -513,6 +668,13 @@ function getRecentMonths(transactions) {
   const set = new Set([monthKey()]);
   transactions.forEach((transaction) => set.add(transaction.date.slice(0, 7)));
   return [...set].sort().slice(-6);
+}
+
+function getAccountBalances(accounts, transactions) {
+  return accounts.map((account) => ({
+    ...account,
+    balance: accountBalance(account.name, account.type, transactions)
+  }));
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

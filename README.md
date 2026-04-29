@@ -2,6 +2,8 @@
 
 LedgerLite is a simple finance dashboard for small business owners. It helps log transactions quickly and view instant Profit & Loss style reports without accounting jargon.
 
+Transactions use a simple double-entry model: every entry has one debit account and one credit account, and the Chart of Accounts shows the balance effect.
+
 ## Run locally
 
 ```bash

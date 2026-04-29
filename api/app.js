@@ -13,10 +13,24 @@ export const defaultCategories = [
 ];
 
 export const defaultRules = [
-  { keyword: "uber", category: "Travel" },
-  { keyword: "zomato", category: "Food" },
-  { keyword: "swiggy", category: "Food" },
-  { keyword: "amazon", category: "Office Expense" }
+  { keyword: "uber", account: "Travel" },
+  { keyword: "zomato", account: "Food" },
+  { keyword: "swiggy", account: "Food" },
+  { keyword: "amazon", account: "Office Expense" }
+];
+
+export const defaultAccounts = [
+  { name: "Bank Account", type: "Asset" },
+  { name: "Cash", type: "Asset" },
+  { name: "Sales Income", type: "Income" },
+  { name: "Rent", type: "Expense" },
+  { name: "Salary", type: "Expense" },
+  { name: "Travel", type: "Expense" },
+  { name: "Food", type: "Expense" },
+  { name: "Office Expense", type: "Expense" },
+  { name: "Bank Charges", type: "Expense" },
+  { name: "Miscellaneous", type: "Expense" },
+  { name: "Owner Equity", type: "Equity" }
 ];
 
 export function createApp() {
@@ -32,6 +46,7 @@ export function createApp() {
   app.get("/api/defaults", (_request, response) => {
     response.json({
       categories: defaultCategories,
+      accounts: defaultAccounts,
       rules: defaultRules
     });
   });
