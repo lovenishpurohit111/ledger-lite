@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import shutil
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +34,19 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {"ok": True, "app": "Financials Conversion", "ai": "Gemini", "claude": False}
+
+
+@app.get("/api/diagnostics")
+def diagnostics() -> dict[str, object]:
+    return {
+        "ok": True,
+        "runtime": "fastapi-python",
+        "conversionJobs": True,
+        "ocrAvailable": shutil.which("tesseract") is not None,
+        "geminiConfigured": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+        "message": "FastAPI conversion worker is available.",
+        "hint": "If OCR or Gemini show warnings, conversion can still run with fallbacks but accuracy may be lower.",
+    }
 
 
 @app.post("/api/jobs")

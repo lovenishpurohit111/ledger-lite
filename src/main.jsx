@@ -37,6 +37,7 @@ function App() {
   const [error, setError] = React.useState("");
   const [dragging, setDragging] = React.useState(false);
   const [pasteStatus, setPasteStatus] = React.useState("");
+  const [checks, setChecks] = React.useState(defaultChecks());
 
   const currentStatement = job.statements[activeStatement] || job.statements[0];
   const overallConfidence = React.useMemo(() => {
@@ -95,21 +96,29 @@ function App() {
   async function startConversion() {
     if (!files.length) {
       setError("Add at least one statement image or scanned PDF.");
+      setChecks(defaultChecks({ files: checkFail("No supported file is queued.") }));
       return;
     }
     setBusy(true);
     setError("");
+    setChecks(defaultChecks({ files: checkPass(`${files.length} file${files.length === 1 ? "" : "s"} queued: ${files.map((file) => `${file.name} (${formatBytes(file.size)})`).join(", ")}`) }));
     setJob({ ...emptyJob, status: "processing", message: "Preprocessing pages and running OCR..." });
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
     try {
+      const diagnostics = await runConversionChecks(files, setChecks);
+      if (diagnostics && diagnostics.conversionJobs === false) {
+        throw new Error(diagnostics.message || "The conversion worker is not available on this deployment.");
+      }
       const response = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await responseError(response));
       const data = await response.json();
+      setChecks((current) => updateCheck(current, "conversion", checkPass("Conversion job completed and returned review rows.")));
       setJob(data);
       setActiveStatement(0);
     } catch (requestError) {
       setError(cleanError(requestError));
+      setChecks((current) => updateCheck(current, "conversion", checkFail(cleanError(requestError))));
       setJob(emptyJob);
     } finally {
       setBusy(false);
@@ -126,7 +135,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ statements: job.statements })
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await responseError(response));
       const data = await response.json();
       setJob((current) => ({ ...current, workbook_url: data.workbook_url, validation: data.validation }));
       window.location.href = `${API_BASE}${data.workbook_url}`;
@@ -188,6 +197,7 @@ function App() {
     setJob(emptyJob);
     setActiveStatement(0);
     setError("");
+    setChecks(defaultChecks());
   }
 
   return (
@@ -256,6 +266,7 @@ function App() {
           </section>
 
           <StatusPanel job={job} confidence={overallConfidence} />
+          <DiagnosticsPanel checks={checks} />
           <ValidationPanel validation={job.validation} />
 
           <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -371,6 +382,28 @@ function ValidationPanel({ validation }) {
   );
 }
 
+function DiagnosticsPanel({ checks }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-bold">Conversion Checks</h2>
+        <span className="text-xs font-bold uppercase text-zinc-500">Live</span>
+      </div>
+      <div className="space-y-2">
+        {Object.entries(checks).map(([key, check]) => (
+          <div key={key} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold">{check.label}</span>
+              <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${checkTone(check.status)}`}>{check.status}</span>
+            </div>
+            <p className="mt-1 text-zinc-600">{check.message}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ReviewTable({ statement, updateRow, deleteRow }) {
   return (
     <div className="overflow-x-auto">
@@ -464,7 +497,104 @@ function formatInputNumber(value) {
 }
 
 function cleanError(error) {
-  return String(error?.message || error || "The conversion failed.").replace(/^Error:\s*/, "");
+  const message = String(error?.message || error || "The conversion failed.").replace(/^Error:\s*/, "");
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed.detail) return typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+    if (parsed.message) return parsed.message;
+    if (parsed.error) return parsed.error;
+  } catch {
+    return message;
+  }
+  return message;
+}
+
+async function responseError(response) {
+  const text = await response.text();
+  try {
+    const parsed = JSON.parse(text);
+    const message = parsed.detail || parsed.message || parsed.error || text;
+    const hint = parsed.hint ? ` ${parsed.hint}` : "";
+    return `${response.status} ${response.statusText}: ${message}${hint}`;
+  } catch {
+    return `${response.status} ${response.statusText}: ${text.slice(0, 300) || "No response body."}`;
+  }
+}
+
+async function runConversionChecks(files, setChecks) {
+  const unsupported = files.filter((file) => !/image\/(png|jpeg|webp)|application\/pdf/.test(file.type) && !/\.(jpe?g|png|webp|pdf)$/i.test(file.name));
+  if (unsupported.length) {
+    const message = `Unsupported file type: ${unsupported.map((file) => file.name).join(", ")}`;
+    setChecks((current) => updateCheck(current, "files", checkFail(message)));
+    throw new Error(message);
+  }
+
+  setChecks((current) => updateCheck(current, "health", checkRunning("Checking /api/health...")));
+  const health = await fetchJson("/api/health");
+  setChecks((current) => updateCheck(current, "health", health.ok ? checkPass(`${health.app || "API"} reachable.`) : checkFail("Health endpoint responded but did not report ok.")));
+
+  setChecks((current) => updateCheck(current, "worker", checkRunning("Checking conversion worker and AI/OCR configuration...")));
+  const diagnostics = await fetchJson("/api/diagnostics");
+  setChecks((current) => ({
+    ...current,
+    worker: { ...current.worker, ...(diagnostics.conversionJobs ? checkPass(diagnostics.message || "Conversion worker is available.") : checkFail(diagnostics.message || "Conversion worker is not available.")) },
+    gemini: { ...current.gemini, ...(diagnostics.geminiConfigured ? checkPass("Gemini API key is configured.") : checkWarn("Gemini key is not configured; fallback reconstruction may be used.")) },
+    ocr: { ...current.ocr, ...(diagnostics.ocrAvailable ? checkPass("OCR runtime is available.") : checkWarn("OCR runtime is missing or unavailable; fallback OCR path may be used.")) }
+  }));
+  return diagnostics;
+}
+
+async function fetchJson(path) {
+  const response = await fetch(`${API_BASE}${path}`, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+function defaultChecks(overrides = {}) {
+  const base = {
+    files: { label: "Input file", status: "idle", message: "Waiting for an uploaded or pasted statement image." },
+    health: { label: "API health", status: "idle", message: "Not checked yet." },
+    worker: { label: "Conversion worker", status: "idle", message: "Not checked yet." },
+    ocr: { label: "OCR runtime", status: "idle", message: "Not checked yet." },
+    gemini: { label: "Gemini", status: "idle", message: "Not checked yet." },
+    conversion: { label: "Job result", status: "idle", message: "Conversion has not started." }
+  };
+  return Object.fromEntries(Object.entries(base).map(([key, value]) => [key, { ...value, ...(overrides[key] || {}) }]));
+}
+
+function updateCheck(current, key, patch) {
+  return { ...current, [key]: { ...current[key], ...patch } };
+}
+
+function checkPass(message) {
+  return { status: "pass", message };
+}
+
+function checkFail(message) {
+  return { status: "fail", message };
+}
+
+function checkWarn(message) {
+  return { status: "warn", message };
+}
+
+function checkRunning(message) {
+  return { status: "checking", message };
+}
+
+function checkTone(status) {
+  if (status === "pass") return "bg-emerald-100 text-emerald-800";
+  if (status === "fail") return "bg-red-100 text-red-800";
+  if (status === "warn") return "bg-amber-100 text-amber-900";
+  if (status === "checking") return "bg-blue-100 text-blue-800";
+  return "bg-zinc-200 text-zinc-600";
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function filesFromClipboardItems(items = []) {
