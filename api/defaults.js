@@ -1,9 +1,8 @@
-import { defaultAccounts, defaultCategories, defaultRules } from "./app.js";
-
 export default function handler(_request, response) {
   response.status(200).json({
-    accounts: defaultAccounts,
-    categories: defaultCategories,
-    rules: defaultRules
+    app: "Financials Conversion",
+    supportedStatements: ["Profit & Loss", "Balance Sheet", "Cash Flow"],
+    supportedFiles: ["JPG", "PNG", "PDF"],
+    pipeline: ["Preprocess", "OCR", "Gemini reconstruction", "Validate", "Excel export"]
   });
 }
