@@ -1,27 +1,62 @@
-# LedgerLite
+# Financials Conversion
 
-LedgerLite is a simple finance dashboard for small business owners. It helps log transactions quickly and view instant Profit & Loss style reports without accounting jargon.
+Financials Conversion turns scanned financial statements into reviewed, clean Excel workbooks. It is built around a cost-conscious hybrid pipeline:
 
-Transactions use a double-entry model: every entry has one debit account and one credit account. The Chart of Accounts and reports show the balance effect, including Profit & Loss and Balance Sheet views.
+1. Upload JPG, PNG, scanned PDF, or multi-page PDF files.
+2. Preprocess pages locally with deskewing, denoising, sharpening, contrast enhancement, orientation/page-boundary correction, and perspective repair when OpenCV is available.
+3. Run local OCR and layout extraction with Tesseract/Pytesseract.
+4. Send compact OCR and layout metadata to Gemini for statement classification, financial interpretation, table reconstruction, terminology normalization, and ambiguity resolution.
+5. Validate totals, duplicate lines, missing values, suspicious OCR rows, and row confidence.
+6. Let users review and correct extracted rows.
+7. Export a polished Excel workbook with separate Profit & Loss, Balance Sheet, and Cash Flow sheets.
 
-## Run locally
+No Claude integration is present or required.
+
+## Tech Stack
+
+- Frontend: React + Vite + Tailwind CSS
+- Backend: Python FastAPI
+- OCR: Tesseract through `pytesseract`
+- Image processing: OpenCV
+- AI reasoning: Gemini API through `google-genai`
+- Excel generation: `openpyxl`
+
+The OCR and preprocessing dependencies are optional at runtime so the app can still start in a development environment. Production deployments should install everything in `requirements.txt` and set `GEMINI_API_KEY`.
+
+## Run Locally
 
 ```bash
 npm install
+python -m pip install -r requirements.txt
+$env:GEMINI_API_KEY="your-key"
 npm run dev
 ```
 
-The app runs at `http://localhost:5173` and the local Express API runs at `http://localhost:3001/api`.
+Frontend: `http://localhost:5173`
 
-## Build
+Backend health check: `http://localhost:3001/api/health`
+
+For test tooling:
 
 ```bash
-npm run build
+python -m pip install -r requirements-dev.txt
+python -m pytest backend/tests
 ```
 
-## Tech stack
+## Sample Assets
 
-- React with functional components
-- Tailwind CSS
-- Node.js + Express API
-- Browser localStorage persistence for the no-auth MVP
+Text sidecars in `samples/input` simulate OCR-readable statements for deterministic testing. Generate the example workbook with:
+
+```bash
+python samples/generate_example.py
+```
+
+The output is written to `samples/output/financials-conversion-example.xlsx`.
+
+## Production Notes
+
+- Install the native Tesseract binary and Poppler for full OCR/PDF rasterization.
+- Keep Gemini prompts compact by sending OCR tokens, bounding boxes, page metadata, and extracted table candidates rather than raw images.
+- Store uploads outside the repository in production object storage.
+- Add authentication and database-backed job tracking before opening this as a SaaS product.
+- Treat the review screen as mandatory for quality control; low-confidence cells and validation warnings are surfaced before export.

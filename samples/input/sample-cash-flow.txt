@@ -1,0 +1,6 @@
+Cash Flow Statement
+For the year ended 2025
+Cash from Operating Activities 46000
+Cash from Investing Activities (12000)
+Cash from Financing Activities 6000
+Net Change in Cash 40000

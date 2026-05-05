@@ -8,3 +8,8 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+__pycache__/
+*.pyc
+backend/app/storage/*
+!backend/app/storage/.gitkeep
+backend/storage/

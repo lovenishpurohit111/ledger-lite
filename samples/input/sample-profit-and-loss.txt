@@ -1,0 +1,7 @@
+Profit and Loss Statement
+For the year ended 2025
+Revenue 125000
+Cost of Goods Sold 42000
+Gross Profit 83000
+Operating Expenses 31000
+Net Income 52000

@@ -1,0 +1,8 @@
+Balance Sheet
+As of December 31 2025
+Cash and Cash Equivalents 76000
+Accounts Receivable 28000
+Total Assets 104000
+Accounts Payable 19000
+Owner Equity 85000
+Total Liabilities and Equity 104000
