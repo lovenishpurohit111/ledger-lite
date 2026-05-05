@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   AlertTriangle,
   CheckCircle2,
+  ClipboardPaste,
   Download,
   FileSpreadsheet,
   FileText,
@@ -35,6 +36,7 @@ function App() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [dragging, setDragging] = React.useState(false);
+  const [pasteStatus, setPasteStatus] = React.useState("");
 
   const currentStatement = job.statements[activeStatement] || job.statements[0];
   const overallConfidence = React.useMemo(() => {
@@ -43,10 +45,51 @@ function App() {
     return Math.round((rows.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / rows.length) * 100);
   }, [job.statements]);
 
-  function updateFiles(nextFiles) {
-    const accepted = [...nextFiles].filter((file) => /image\/(png|jpeg)|application\/pdf/.test(file.type) || /\.(jpe?g|png|pdf)$/i.test(file.name));
+  const updateFiles = React.useCallback((nextFiles, source = "upload") => {
+    const accepted = [...nextFiles].filter((file) => /image\/(png|jpeg|webp)|application\/pdf/.test(file.type) || /\.(jpe?g|png|webp|pdf)$/i.test(file.name));
     setFiles((current) => [...current, ...accepted]);
     setError(accepted.length ? "" : "Add JPG, PNG, or scanned PDF files.");
+    if (accepted.length && source === "paste") {
+      setPasteStatus(`${accepted.length} screenshot${accepted.length === 1 ? "" : "s"} pasted and ready to convert.`);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    function handlePaste(event) {
+      const pastedFiles = filesFromClipboardItems(event.clipboardData?.items);
+      if (!pastedFiles.length) return;
+      event.preventDefault();
+      updateFiles(pastedFiles, "paste");
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [updateFiles]);
+
+  async function pasteScreenshot() {
+    setError("");
+    setPasteStatus("");
+    if (!navigator.clipboard?.read) {
+      setError("Your browser does not expose direct clipboard image reads. Use Ctrl+V or Cmd+V after taking the screenshot.");
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      const imageFiles = [];
+      for (const item of items) {
+        const imageType = item.types.find((type) => type.startsWith("image/"));
+        if (!imageType) continue;
+        const blob = await item.getType(imageType);
+        imageFiles.push(blobToFile(blob, `pasted-statement-${Date.now()}-${imageFiles.length + 1}.${extensionForType(imageType)}`));
+      }
+      if (!imageFiles.length) {
+        setError("No screenshot image was found on the clipboard.");
+        return;
+      }
+      updateFiles(imageFiles, "paste");
+    } catch {
+      setError("Clipboard access was blocked. Click the upload panel and press Ctrl+V or Cmd+V instead.");
+    }
   }
 
   async function startConversion() {
@@ -187,10 +230,15 @@ function App() {
           >
             <label className="flex min-h-48 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center hover:border-emerald-600 hover:bg-emerald-50">
               <FolderUp className="mb-3 text-emerald-700" size={34} />
-              <span className="font-bold">Drop statements here</span>
-              <span className="mt-1 text-sm text-zinc-500">JPG, PNG, PDFs, and multi-page scans</span>
-              <input type="file" className="hidden" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" onChange={(event) => updateFiles(event.target.files)} />
+              <span className="font-bold">Drop or paste statements here</span>
+              <span className="mt-1 text-sm text-zinc-500">JPG, PNG, PDFs, screenshots, and multi-page scans</span>
+              <input type="file" className="hidden" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => updateFiles(event.target.files)} />
             </label>
+            <button type="button" onClick={pasteScreenshot} disabled={busy} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60">
+              <ClipboardPaste size={17} />
+              Paste screenshot from clipboard
+            </button>
+            {pasteStatus && <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{pasteStatus}</p>}
             <div className="mt-4 space-y-2">
               {files.map((file, index) => (
                 <div key={`${file.name}-${index}`} className="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 text-sm">
@@ -417,6 +465,28 @@ function formatInputNumber(value) {
 
 function cleanError(error) {
   return String(error?.message || error || "The conversion failed.").replace(/^Error:\s*/, "");
+}
+
+function filesFromClipboardItems(items = []) {
+  return [...items]
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item, index) => {
+      const file = item.getAsFile();
+      if (!file) return null;
+      const extension = extensionForType(file.type);
+      return blobToFile(file, file.name || `pasted-statement-${Date.now()}-${index + 1}.${extension}`);
+    })
+    .filter(Boolean);
+}
+
+function blobToFile(blob, name) {
+  return new File([blob], name, { type: blob.type || "image/png", lastModified: Date.now() });
+}
+
+function extensionForType(type) {
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  return "png";
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

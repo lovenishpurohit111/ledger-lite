@@ -41,7 +41,7 @@ async def create_job(files: list[UploadFile] = File(...)):
     for upload in files:
         name = (upload.filename or "").lower()
         content_type = (upload.content_type or "").lower()
-        if not (name.endswith((".jpg", ".jpeg", ".png", ".pdf", ".txt")) or content_type in {"image/jpeg", "image/png", "application/pdf", "text/plain"}):
+        if not (name.endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf", ".txt")) or content_type in {"image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"}):
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {upload.filename}")
     return await pipeline.run(files)
 

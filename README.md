@@ -2,7 +2,7 @@
 
 Financials Conversion turns scanned financial statements into reviewed, clean Excel workbooks. It is built around a cost-conscious hybrid pipeline:
 
-1. Upload JPG, PNG, scanned PDF, or multi-page PDF files.
+1. Upload JPG, PNG, WEBP, scanned PDF, multi-page PDF files, or paste a screenshot from the clipboard.
 2. Preprocess pages locally with deskewing, denoising, sharpening, contrast enhancement, orientation/page-boundary correction, and perspective repair when OpenCV is available.
 3. Run local OCR and layout extraction with Tesseract/Pytesseract.
 4. Send compact OCR and layout metadata to Gemini for statement classification, financial interpretation, table reconstruction, terminology normalization, and ambiguity resolution.
@@ -60,3 +60,7 @@ The output is written to `samples/output/financials-conversion-example.xlsx`.
 - Store uploads outside the repository in production object storage.
 - Add authentication and database-backed job tracking before opening this as a SaaS product.
 - Treat the review screen as mandatory for quality control; low-confidence cells and validation warnings are surfaced before export.
+
+## Screenshot Paste
+
+Take a screenshot of a Profit & Loss, Balance Sheet, or Cash Flow statement, then open the app and press `Ctrl+V` or `Cmd+V`. You can also use the **Paste screenshot from clipboard** button in the upload panel. Pasted screenshots are converted into image files and sent through the same preprocessing, OCR, Gemini reconstruction, validation, and Excel export pipeline.

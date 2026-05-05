@@ -15,7 +15,7 @@ export function createApp() {
     response.json({
       app: "Financials Conversion",
       supportedStatements: ["Profit & Loss", "Balance Sheet", "Cash Flow"],
-      supportedFiles: ["JPG", "PNG", "PDF"],
+      supportedFiles: ["JPG", "PNG", "WEBP", "PDF", "Clipboard screenshots"],
       pipeline: ["Preprocess", "OCR", "Gemini reconstruction", "Validate", "Excel export"]
     });
   });
