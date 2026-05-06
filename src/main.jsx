@@ -1,4 +1,5 @@
 import React from "react";
+import { processImages, exportToExcel } from "./processor.js";
 import ReactDOM from "react-dom/client";
 import {
   AlertTriangle,
@@ -101,20 +102,31 @@ function App() {
     }
     setBusy(true);
     setError("");
-    setChecks(defaultChecks({ files: checkPass(`${files.length} file${files.length === 1 ? "" : "s"} queued: ${files.map((file) => `${file.name} (${formatBytes(file.size)})`).join(", ")}`) }));
-    setJob({ ...emptyJob, status: "processing", message: "Preprocessing pages and running OCR..." });
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
+    setChecks(defaultChecks({ files: checkPass(`${files.length} file${files.length === 1 ? "" : "s"} queued.`) }));
+    setJob({ ...emptyJob, status: "processing", message: "Loading OCR engine..." });
     try {
-      const diagnostics = await runConversionChecks(files, setChecks);
-      if (diagnostics && diagnostics.conversionJobs === false) {
-        throw new Error(diagnostics.message || "The conversion worker is not available on this deployment.");
-      }
-      const response = await fetch(`${API_BASE}/api/jobs`, { method: "POST", body: formData });
-      if (!response.ok) throw new Error(await responseError(response));
-      const data = await response.json();
-      setChecks((current) => updateCheck(current, "conversion", checkPass("Conversion job completed and returned review rows.")));
-      setJob(data);
+      setChecks((current) => updateCheck(current, "worker", checkRunning("Running Tesseract OCR in browser...")));
+      const statements = await processImages(files, (pct) => {
+        setJob((j) => ({ ...j, message: `OCR in progress: ${pct}%` }));
+      });
+      if (!statements.length) throw new Error("No financial data could be extracted. Try a clearer image.");
+      setChecks((current) => ({
+        ...current,
+        worker: checkPass("OCR completed successfully."),
+        conversion: checkPass(`Extracted ${statements.length} statement(s).`)
+      }));
+      setJob({
+        job_id: crypto.randomUUID(),
+        status: "completed",
+        message: `Extracted ${statements.length} statement(s) using local OCR.`,
+        statements,
+        validation: { issues: [], summary: { high: 0, medium: 0, low: 0 } },
+        pipeline: [
+          { name: "Upload", status: "completed" },
+          { name: "Tesseract OCR", status: "completed" },
+          { name: "Financial Parsing", status: "completed" }
+        ]
+      });
       setActiveStatement(0);
     } catch (requestError) {
       setError(cleanError(requestError));
@@ -130,15 +142,8 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_BASE}/api/jobs/${job.job_id}/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ statements: job.statements })
-      });
-      if (!response.ok) throw new Error(await responseError(response));
-      const data = await response.json();
-      setJob((current) => ({ ...current, workbook_url: data.workbook_url, validation: data.validation }));
-      window.location.href = `${API_BASE}${data.workbook_url}`;
+      exportToExcel(job.statements);
+      setJob((current) => ({ ...current, workbook_url: "#downloaded" }));
     } catch (requestError) {
       setError(cleanError(requestError));
     } finally {
