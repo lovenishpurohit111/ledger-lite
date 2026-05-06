@@ -18,9 +18,9 @@ function parseFiles(req) {
   });
 }
 
-async function extractWithClaude(base64, mimeType) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
+async function extractWithGroq(base64, mimeType) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY is not configured.");
 
   const prompt = `You are a financial statement expert. Analyze this image and extract ALL financial data.
 
@@ -30,42 +30,34 @@ Return ONLY valid JSON — no markdown, no explanation — with this exact struc
     {
       "statement_type": "Profit & Loss",
       "rows": [
-        {
-          "label": "Sales",
-          "amount": 35306,
-          "level": 1,
-          "section": "Revenue",
-          "row_type": "line_item",
-          "confidence": 0.97
-        }
+        { "label": "Sales", "amount": 35306, "level": 1, "section": "Revenue", "row_type": "line_item", "confidence": 0.97 }
       ]
     }
   ]
 }
 
 Rules:
-- statement_type must be one of: "Profit & Loss", "Balance Sheet", "Cash Flow"
-- row_type: "header" for section headers, "line_item" for data rows, "subtotal" for sub-totals, "total" for grand totals
-- level: 1 for top-level rows, 2 for indented sub-items
-- amount: numeric value only (no commas, no currency symbols). Use negative for deductions.
-- confidence: 0.95+ for clearly visible, 0.7-0.85 for uncertain text
-- Skip percentage-only rows (OPM%, Tax%, EPS, Dividend Payout)
+- statement_type: "Profit & Loss", "Balance Sheet", or "Cash Flow"
+- row_type: "header", "line_item", "subtotal", or "total"
+- level: 1 for top-level, 2 for sub-items
+- amount: number only, negative for deductions
+- Skip percentage rows (OPM%, Tax%, EPS, Dividend%)
 - If multiple years shown, extract the most recent column only`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
+      "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: "llama-3.2-11b-vision-preview",
       max_tokens: 4096,
+      temperature: 0.1,
       messages: [{
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
           { type: "text", text: prompt }
         ]
       }]
@@ -74,11 +66,11 @@ Rules:
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${err.slice(0, 300)}`);
+    throw new Error(`Groq API error ${response.status}: ${err.slice(0, 300)}`);
   }
 
   const data = await response.json();
-  const text = data.content?.[0]?.text || "";
+  const text = data.choices?.[0]?.message?.content || "";
   const clean = text.replace(/```json\n?|\n?```/g, "").trim();
 
   try {
@@ -89,9 +81,7 @@ Rules:
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const files = await parseFiles(req);
@@ -101,7 +91,7 @@ export default async function handler(req, res) {
     for (const file of files) {
       const base64 = file.data.toString("base64");
       const mimeType = file.type?.startsWith("image/") ? file.type : "image/png";
-      const extracted = await extractWithClaude(base64, mimeType);
+      const extracted = await extractWithGroq(base64, mimeType);
       for (const stmt of extracted.statements || []) {
         allStatements.push({
           id: randomUUID(),
@@ -121,24 +111,21 @@ export default async function handler(req, res) {
     }
 
     const validationIssues = allStatements.flatMap((stmt) =>
-      stmt.rows
-        .filter((row) => row.confidence < 0.8)
-        .map((row) => ({
-          code: "LOW_CONFIDENCE",
-          severity: "medium",
-          message: `"${row.label}" has low confidence (${Math.round(row.confidence * 100)}%). Please verify.`
-        }))
+      stmt.rows.filter((r) => r.confidence < 0.8).map((r) => ({
+        code: "LOW_CONFIDENCE", severity: "medium",
+        message: `"${r.label}" has low confidence (${Math.round(r.confidence * 100)}%). Please verify.`
+      }))
     );
 
     res.status(200).json({
       job_id: randomUUID(),
       status: "completed",
-      message: `Extracted ${allStatements.length} statement(s) using Claude AI.`,
+      message: `Extracted ${allStatements.length} statement(s) using Groq AI.`,
       statements: allStatements,
       validation: { issues: validationIssues, summary: { high: 0, medium: validationIssues.length, low: 0 } },
       pipeline: [
         { name: "Upload", status: "completed" },
-        { name: "Claude AI Extraction", status: "completed" },
+        { name: "Groq AI Extraction", status: "completed" },
         { name: "Validation", status: "completed" }
       ]
     });
