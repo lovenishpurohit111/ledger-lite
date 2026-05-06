@@ -2,10 +2,10 @@ export default function handler(_request, response) {
   response.status(200).json({
     ok: true,
     runtime: "vercel-node",
-    conversionJobs: false,
+    conversionJobs: true,
     ocrAvailable: false,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
-    message: "The static Vercel deployment is reachable, but the Python conversion worker is not attached to this production route.",
-    hint: "Run the FastAPI backend locally with npm run dev, or deploy the backend as a dedicated service/API before using Convert in production."
+    message: "Gemini-powered conversion worker is available.",
+    hint: "Upload an image and click Convert. The Node.js worker will send it to Gemini for extraction."
   });
 }
