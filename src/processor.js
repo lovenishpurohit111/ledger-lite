@@ -196,12 +196,14 @@ function assign(rowWords, cols, cutX) {
   for(const w of rowWords) {
     const cx=(w.bbox.x0+w.bbox.x1)/2;
     if(cx<cutX-5) continue;
-    // Strip % before parsing so "31%" → 31
-    const n=safeParse(w.text);
+    const isPct = w.text.includes("%");
+    // For % values keep as string ("31%"), for others parse as number
+    const n = isPct ? safeParse(w.text.replace(/%/g,"")) : safeParse(w.text);
     if(n===null) continue;
+    const val = isPct ? n+"%" : n;
     let best=-1,bd=tol;
     cols.forEach((c,i)=>{if(!used.has(i)){const d=Math.abs(cx-c.cx);if(d<bd){bd=d;best=i;}}});
-    if(best>=0){res[best]=n;used.add(best);}
+    if(best>=0){res[best]=val;used.add(best);}
   }
   return res;
 }
@@ -234,7 +236,7 @@ function buildTable(words, text) {
 
     trows.push({id:crypto.randomUUID(),label,section,
       row_type:classify(label),values:vals,
-      amount:[...vals].reverse().find(v=>v!==null)||0,
+      amount:[...vals].reverse().find(v=>v!==null)??0,
       level:1,confidence:0.9,issues:[]});
   }
   return trows.length?{columns:cols.map(c=>c.header),rows:trows}:null;
