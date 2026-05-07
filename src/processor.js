@@ -10,7 +10,7 @@ const PCT_RE   = /%/;
 
 const TOTAL_KW = ["total","net profit","gross profit","operating profit",
   "profit before tax","profit after tax","ebitda","net income","net loss","profit before"];
-const SKIP_RE  = /^(eps|earning per|dividend payout|book value|face value|consolidated|standalone|rs\.?\s*crore|particulars|description)/i;
+const SKIP_RE  = /^(consolidated|standalone|rs\.?\s*crore|particulars|description|view standalone)/i;
 
 const SECTION_MAP = {
   Revenue:     ["sales","revenue","turnover","income from operation"],
@@ -122,7 +122,7 @@ function assign(rowWords, cols, cutX) {
     if (PCT_RE.test(w.text)) continue;
     const cx = (w.bbox.x0 + w.bbox.x1)/2;
     if (cx < cutX - 5) continue;
-    const n = safeParse(w.text);
+    const n = safeParse(w.text.replace(/%/g,""));
     if (n === null) continue;
     let best=-1, bd=tol;
     cols.forEach((c,i)=>{ if(!used.has(i)){const d=Math.abs(cx-c.cx); if(d<bd){bd=d;best=i;}} });
@@ -149,9 +149,6 @@ function buildTable(words, text) {
     if (ri <= hri) continue;
     const rw = rows[ri].words;
     if (!rw.length) continue;
-
-    // skip % rows
-    if (rw.filter(w=>PCT_RE.test(w.text)).length >= 2) continue;
 
     const label = rw.filter(w=>(w.bbox.x0+w.bbox.x1)/2 < cutX)
       .map(w=>w.text).join(" ").replace(/[+*©®™|<>:]+$/,"").replace(/\s+/g," ").trim();
