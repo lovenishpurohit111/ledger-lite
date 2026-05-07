@@ -11,20 +11,19 @@ const STATEMENT_SIGNALS = {
 function detectStatementType(text) {
   const lower = text.toLowerCase();
   for (const [type, signals] of Object.entries(STATEMENT_SIGNALS)) {
-    const hits = signals.filter(s => lower.includes(s)).length;
-    if (hits >= 2) return type;
+    if (signals.filter(s => lower.includes(s)).length >= 2) return type;
   }
   return "Profit & Loss";
 }
 
 // ── Section detection ─────────────────────────────────────────────────────────
 const SECTION_SIGNALS = {
-  "Revenue":      ["sales", "revenue", "turnover", "income from operations", "net sales"],
-  "Expenses":     ["expenses", "cost of", "raw material", "employee", "depreciation", "interest"],
-  "Profit":       ["profit", "ebitda", "ebit", "earnings"],
-  "Assets":       ["fixed assets", "current assets", "investments", "receivables", "inventory", "cash and"],
-  "Liabilities":  ["current liabilities", "long-term", "borrowings", "payables", "provisions"],
-  "Equity":       ["equity", "retained earnings", "reserves", "share capital", "net worth"]
+  "Revenue":     ["sales", "revenue", "turnover", "income from operations", "net sales"],
+  "Expenses":    ["expenses", "cost of", "raw material", "employee", "depreciation", "interest"],
+  "Profit":      ["profit", "ebitda", "ebit", "earnings", "other income"],
+  "Assets":      ["fixed assets", "current assets", "investments", "receivables", "inventory"],
+  "Liabilities": ["liabilities", "borrowings", "payables", "provisions"],
+  "Equity":      ["equity", "retained earnings", "reserves", "share capital"]
 };
 
 function detectSection(label) {
@@ -36,70 +35,72 @@ function detectSection(label) {
 }
 
 // ── Row type classification ───────────────────────────────────────────────────
-const TOTAL_SIGNALS   = ["total", "net profit", "gross profit", "operating profit", "profit before tax",
-                          "profit after tax", "ebitda", "net income", "net loss"];
-const HEADER_SIGNALS  = ["particulars", "description", "items", "schedule"];
+const TOTAL_LABELS = ["total", "net profit", "gross profit", "operating profit",
+  "profit before tax", "profit after tax", "ebitda", "net income", "net loss", "profit before"];
 
 function classifyRow(label) {
   const lower = label.toLowerCase();
-  if (HEADER_SIGNALS.some(s => lower.includes(s))) return "header";
-  if (TOTAL_SIGNALS.some(s => lower.startsWith(s) || lower.includes(s))) return "total";
+  if (TOTAL_LABELS.some(s => lower.includes(s))) return "total";
   if (lower.startsWith("sub-total") || lower.startsWith("subtotal")) return "subtotal";
   return "line_item";
 }
 
-// ── Core OCR text → rows parser ───────────────────────────────────────────────
-function parseOCRText(rawText) {
-  const lines = rawText
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.length > 1);
+// ── Rows to always skip ───────────────────────────────────────────────────────
+const SKIP_LABEL_PATTERNS = [
+  /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(\s|$)/i,  // month headers
+  /^(fy|q[1-4]|ttm|quarter|annual|year)(\s|$)/i,                // period labels
+  /^(eps|earning per share|dividend payout|book value|face value)/i, // ratio rows
+  /^consolidated|standalone|rs\.?\s*crore/i                      // footnotes
+];
 
+function shouldSkipLabel(label) {
+  return SKIP_LABEL_PATTERNS.some(re => re.test(label.trim()));
+}
+
+// ── Core text → rows parser ───────────────────────────────────────────────────
+function parseOCRText(rawText) {
+  const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 1);
   const rows = [];
   let currentSection = "General";
 
   for (const line of lines) {
-    // Find all numbers (including negatives, commas, decimals)
-    const allNumbers = [...line.matchAll(/(-?[\d,]+(?:\.\d+)?)/g)]
-      .map(m => parseFloat(m[0].replace(/,/g, "")))
-      .filter(n => !isNaN(n));
+    // ── 1. Skip lines dominated by percentages (OPM%, Tax%, Dividend%) ──
+    const percentCount = (line.match(/%/g) || []).length;
+    if (percentCount >= 2) continue; // row full of % values = ratio row, skip
 
-    // Skip lines with no numbers
-    if (allNumbers.length === 0) continue;
+    // ── 2. Find numbers NOT followed by % ──
+    const numberMatches = [...line.matchAll(/(-?[\d,]+(?:\.\d+)?)(?!%|\.\d)/g)]
+      .map(m => ({ val: parseFloat(m[0].replace(/,/g, "")), idx: m.index }))
+      .filter(m => !isNaN(m.val));
 
-    // Skip lines that look like a header row (years, dates)
-    const labelPart = line.substring(0, line.search(/(-?[\d,]+)/) ).trim();
-    if (!labelPart || labelPart.length < 2) continue;
+    if (numberMatches.length === 0) continue;
 
-    // Skip pure percentage rows (OPM%, EPS, Tax%, etc.)
-    const nonPctNumbers = [...line.matchAll(/(-?[\d,]+(?:\.\d+)?)(?!%)/g)]
-      .map(m => parseFloat(m[0].replace(/,/g, ""))).filter(n => !isNaN(n));
-    if (nonPctNumbers.length === 0) continue;
-
-    // Clean label
-    const label = labelPart
+    // ── 3. Extract label (everything before first number) ──
+    const firstIdx = numberMatches[0].idx;
+    const rawLabel = line.substring(0, firstIdx)
       .replace(/[+\-*©®™|<>:]+$/, "")
       .replace(/\s+/g, " ")
       .trim();
 
-    if (!label || /^\d+$/.test(label)) continue;
+    if (!rawLabel || rawLabel.length < 2 || /^\d+$/.test(rawLabel)) continue;
+    if (shouldSkipLabel(rawLabel)) continue;
 
-    // Use the LAST number (most recent column in multi-year tables)
-    const amount = nonPctNumbers[nonPctNumbers.length - 1];
+    // ── 4. Use LAST number = most recent column ──
+    const amount = numberMatches[numberMatches.length - 1].val;
 
-    // Update running section
-    const detectedSection = detectSection(label);
+    // ── 5. Section + type ──
+    const detectedSection = detectSection(rawLabel);
     if (detectedSection) currentSection = detectedSection;
 
-    const rowType = classifyRow(label);
-    const level = /^\s{2,}/.test(line) ? 2 : 1;
-
-    // Confidence: lower for short labels or unusual amounts
-    const confidence = label.length < 3 ? 0.65
-      : Math.abs(amount) > 1e9 ? 0.7
-      : 0.9;
-
-    rows.push({ label, amount, section: currentSection, row_type: rowType, level, confidence });
+    rows.push({
+      label: rawLabel,
+      amount,
+      section: currentSection,
+      row_type: classifyRow(rawLabel),
+      level: 1,
+      confidence: rawLabel.length < 3 ? 0.65 : 0.9,
+      issues: []
+    });
   }
 
   return rows;
@@ -121,12 +122,11 @@ export async function processImages(files, onProgress) {
       const { data } = await worker.recognize(url);
       const statementType = detectStatementType(data.text);
       const rows = parseOCRText(data.text);
-
       if (rows.length > 0) {
         allStatements.push({
           id: crypto.randomUUID(),
           statement_type: statementType,
-          rows: rows.map(r => ({ ...r, id: crypto.randomUUID(), issues: [] }))
+          rows: rows.map(r => ({ ...r, id: crypto.randomUUID() }))
         });
       }
     } finally {
@@ -146,18 +146,8 @@ export function exportToExcel(statements) {
     const header = [["Section", "Line Item", "Amount (₹ Cr)", "Type"]];
     const dataRows = stmt.rows.map(r => [r.section, r.label, r.amount, r.row_type]);
     const ws = XLSX.utils.aoa_to_sheet([...header, ...dataRows]);
-
-    // Column widths
     ws["!cols"] = [{ wch: 18 }, { wch: 36 }, { wch: 16 }, { wch: 12 }];
-
-    // Bold header row
-    for (let c = 0; c < 4; c++) {
-      const cell = XLSX.utils.encode_cell({ r: 0, c });
-      if (ws[cell]) ws[cell].s = { font: { bold: true } };
-    }
-
-    const sheetName = stmt.statement_type.substring(0, 31);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.utils.book_append_sheet(wb, ws, stmt.statement_type.substring(0, 31));
   }
 
   XLSX.writeFile(wb, "financials-export.xlsx");
