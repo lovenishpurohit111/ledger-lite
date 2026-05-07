@@ -197,6 +197,24 @@ function App() {
     }));
   }
 
+  function updateColValue(rowId, colIndex, val) {
+    const n = parseNumber(val);
+    setJob((current) => ({
+      ...current,
+      statements: current.statements.map((statement, index) =>
+        index !== activeStatement ? statement : {
+          ...statement,
+          rows: statement.rows.map((row) => {
+            if (row.id !== rowId) return row;
+            const newVals = [...(row.values || [])];
+            newVals[colIndex] = n;
+            return { ...row, values: newVals, amount: [...newVals].reverse().find(v => v !== null) || 0 };
+          })
+        }
+      )
+    }));
+  }
+
   function reset() {
     setFiles([]);
     setJob(emptyJob);
@@ -324,7 +342,7 @@ function App() {
                   </button>
                 ))}
               </div>
-              <ReviewTable statement={currentStatement} updateRow={updateRow} deleteRow={deleteRow} />
+              <ReviewTable statement={currentStatement} updateRow={updateRow} deleteRow={deleteRow} updateColValue={updateColValue} />
             </>
           )}
         </section>
@@ -409,7 +427,59 @@ function DiagnosticsPanel({ checks }) {
   );
 }
 
-function ReviewTable({ statement, updateRow, deleteRow }) {
+function ReviewTable({ statement, updateRow, deleteRow, updateColValue }) {
+  const td = statement.tableData;
+
+  if (td && td.columns && td.columns.length > 1) {
+    // ── Multi-year spreadsheet view ──────────────────────────────────────────
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm border-collapse">
+          <thead className="bg-zinc-50 text-xs font-bold uppercase text-zinc-500 sticky top-0 z-10">
+            <tr>
+              <th className="px-4 py-3 border-b border-zinc-200 min-w-[200px] bg-zinc-50">Line Item</th>
+              {td.columns.map((col) => (
+                <th key={col} className="px-3 py-3 border-b border-zinc-200 text-right whitespace-nowrap bg-zinc-50 min-w-[90px]">{col}</th>
+              ))}
+              <th className="px-3 py-3 border-b border-zinc-200 w-10 bg-zinc-50" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100">
+            {statement.rows.map((row) => {
+              const isTotal = row.row_type === "total" || row.row_type === "subtotal";
+              return (
+                <tr key={row.id} className={isTotal ? "bg-amber-50/60" : "bg-white hover:bg-zinc-50/60"}>
+                  <td className="px-4 py-1.5 border-r border-zinc-100">
+                    <input
+                      value={row.label || ""}
+                      onChange={(e) => updateRow(row.id, "label", e.target.value)}
+                      className={`table-input ${isTotal ? "font-bold" : "font-medium"}`}
+                    />
+                  </td>
+                  {(row.values || td.columns.map(() => null)).map((val, ci) => (
+                    <td key={ci} className="px-2 py-1.5 text-right">
+                      <input
+                        value={val !== null && val !== undefined ? val : ""}
+                        onChange={(e) => updateColValue(row.id, ci, e.target.value)}
+                        className={`table-input text-right font-mono text-xs w-full ${isTotal ? "font-bold" : ""}`}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-2 py-1.5 text-right">
+                    <button onClick={() => deleteRow(row.id)} className="icon-button text-zinc-400 hover:bg-red-50 hover:text-red-700" title="Delete row">
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // ── Single-column fallback view ────────────────────────────────────────────
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[920px] text-left text-sm">
