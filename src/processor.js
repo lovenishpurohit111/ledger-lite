@@ -175,16 +175,45 @@ function toRows(words, yTol=10) {
 function detectCols(rows) {
   for(let ri=0;ri<rows.length;ri++) {
     const ws=rows[ri].words;
-    if(!ws.some(w=>MONTH_RE.test(w.text)||/^TTM$/i.test(w.text))) continue;
+    if(!ws.some(w=>MONTH_RE.test(w.text))) continue;
+
     const cols=[];
+    let lastColEndIdx=-1;
+
     for(let i=0;i<ws.length;i++) {
       if(MONTH_RE.test(ws[i].text)&&ws[i+1]&&YEAR_RE.test(ws[i+1].text)) {
-        cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2}); i++;
-      } else if(/^TTM[.,:]?$/i.test(ws[i].text.trim())) {
+        cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2});
+        lastColEndIdx=i+1; i++;
+      } else if(/^T+M[.,:]?$/i.test(ws[i].text.trim())) {
+        // catches TTM, TIM, TTW etc. (OCR misreads)
         cols.push({header:"TTM",cx:(ws[i].bbox.x0+ws[i].bbox.x1)/2});
+        lastColEndIdx=i;
       }
     }
-    if(cols.length>=2) return {hri:ri,cols};
+
+    if(cols.length<2) continue;
+
+    // If no TTM detected, check for any leftover word(s) after the last year
+    if(!cols.find(c=>c.header==="TTM")) {
+      const spacing=(cols[cols.length-1].cx-cols[0].cx)/Math.max(cols.length-1,1);
+      const extraWords=ws.filter(w=>{
+        const cx=(w.bbox.x0+w.bbox.x1)/2;
+        return cx>cols[cols.length-1].cx+spacing*0.4 && w.text.trim().length>0;
+      });
+      if(extraWords.length>0) {
+        // Use the word closest to expected TTM position
+        const expectedCx=cols[cols.length-1].cx+spacing;
+        const best=extraWords.sort((a,b)=>
+          Math.abs((a.bbox.x0+a.bbox.x1)/2-expectedCx)-Math.abs((b.bbox.x0+b.bbox.x1)/2-expectedCx)
+        )[0];
+        cols.push({header:"TTM",cx:(best.bbox.x0+best.bbox.x1)/2});
+      } else {
+        // Extrapolate TTM column position even if header not visible
+        cols.push({header:"TTM",cx:cols[cols.length-1].cx+spacing});
+      }
+    }
+
+    return {hri:ri,cols};
   }
   return null;
 }
