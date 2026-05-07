@@ -180,7 +180,7 @@ function detectCols(rows) {
     for(let i=0;i<ws.length;i++) {
       if(MONTH_RE.test(ws[i].text)&&ws[i+1]&&YEAR_RE.test(ws[i+1].text)) {
         cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2}); i++;
-      } else if(/^TTM$/i.test(ws[i].text)) {
+      } else if(/^TTM[.,:]?$/i.test(ws[i].text.trim())) {
         cols.push({header:"TTM",cx:(ws[i].bbox.x0+ws[i].bbox.x1)/2});
       }
     }
@@ -191,7 +191,7 @@ function detectCols(rows) {
 
 function assign(rowWords, cols, cutX) {
   const span=cols[cols.length-1].cx-cols[0].cx;
-  const tol=Math.max(40,(span/Math.max(cols.length-1,1))*0.6);
+  const tol=Math.max(50,(span/Math.max(cols.length-1,1))*0.75);
   const res=cols.map(()=>null), used=new Set();
   for(const w of rowWords) {
     const cx=(w.bbox.x0+w.bbox.x1)/2;
@@ -206,6 +206,25 @@ function assign(rowWords, cols, cutX) {
     if(best>=0){res[best]=val;used.add(best);}
   }
   return res;
+}
+
+
+// Merge fragments like ['79,','809'] → one word '79,809' at merged position
+function mergeNumberFragments(words) {
+  const out = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const next = words[i+1];
+    // If current ends with comma and next is digits, merge them
+    if (/^-?[\d,]*\d,$/.test(w.text) && next && /^\d+$/.test(next.text)) {
+      out.push({ text: w.text + next.text, conf: Math.min(w.conf, next.conf),
+        bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: next.bbox.x1, y1: next.bbox.y1 } });
+      i++; // skip next
+    } else {
+      out.push(w);
+    }
+  }
+  return out;
 }
 
 function buildTable(words, text) {
@@ -228,7 +247,8 @@ function buildTable(words, text) {
 
     if(!label||label.length<2||/^\d+$/.test(label)||SKIP_RE.test(label)) continue;
 
-    const vals=assign(rw,cols,cutX);
+    const mergedRw = mergeNumberFragments(rw);
+    const vals=assign(mergedRw,cols,cutX);
     if(!vals.some(v=>v!==null)) continue;
 
     const sec=getSection(label);
