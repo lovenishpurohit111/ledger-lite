@@ -1,117 +1,215 @@
 import { createWorker } from "tesseract.js";
 import * as XLSX from "xlsx";
 
-// ── Statement type detection ──────────────────────────────────────────────────
-const STATEMENT_SIGNALS = {
-  "Profit & Loss": ["profit", "loss", "p&l", "income statement", "revenue", "sales", "expenses", "operating"],
-  "Balance Sheet": ["balance sheet", "assets", "liabilities", "equity", "net worth"],
-  "Cash Flow":     ["cash flow", "cash from", "operating activities", "investing activities", "financing"]
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────
+const MONTH_RE   = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i;
+const YEAR_RE    = /^\d{4}$/;
+const PCT_RE     = /%/;
+
+const TOTAL_KEYWORDS = [
+  "total", "net profit", "gross profit", "operating profit",
+  "profit before tax", "profit after tax", "ebitda", "net income",
+  "net loss", "profit before"
+];
+
+const SKIP_RE = /^(eps|earning per|dividend payout|book value|face value|consolidated|standalone|rs\.?\s*crore|particulars|description)/i;
+
+const SECTION_MAP = {
+  Revenue:     ["sales", "revenue", "turnover", "income from operation"],
+  Expenses:    ["expense", "cost of", "depreciation", "amortization", "interest"],
+  Profit:      ["profit", "ebitda", "ebit", "other income", "earnings"],
+  Assets:      ["asset", "investment", "receivable", "inventory", "cash and"],
+  Liabilities: ["liabilit", "borrowing", "payable", "provision"],
+  Equity:      ["equity", "retained earning", "reserve", "share capital"]
 };
 
-function detectStatementType(text) {
-  const lower = text.toLowerCase();
-  for (const [type, signals] of Object.entries(STATEMENT_SIGNALS)) {
-    if (signals.filter(s => lower.includes(s)).length >= 2) return type;
-  }
-  return "Profit & Loss";
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function classifyRow(label) {
+  const l = label.toLowerCase();
+  if (TOTAL_KEYWORDS.some(k => l.includes(k))) return "total";
+  if (l.startsWith("sub-total") || l.startsWith("subtotal")) return "subtotal";
+  return "line_item";
 }
 
-// ── Section detection ─────────────────────────────────────────────────────────
-const SECTION_SIGNALS = {
-  "Revenue":     ["sales", "revenue", "turnover", "income from operations", "net sales"],
-  "Expenses":    ["expenses", "cost of", "raw material", "employee", "depreciation", "interest"],
-  "Profit":      ["profit", "ebitda", "ebit", "earnings", "other income"],
-  "Assets":      ["fixed assets", "current assets", "investments", "receivables", "inventory"],
-  "Liabilities": ["liabilities", "borrowings", "payables", "provisions"],
-  "Equity":      ["equity", "retained earnings", "reserves", "share capital"]
-};
-
 function detectSection(label) {
-  const lower = label.toLowerCase();
-  for (const [section, signals] of Object.entries(SECTION_SIGNALS)) {
-    if (signals.some(s => lower.includes(s))) return section;
+  const l = label.toLowerCase();
+  for (const [sec, kws] of Object.entries(SECTION_MAP))
+    if (kws.some(k => l.includes(k))) return sec;
+  return null;
+}
+
+function detectStatementType(text) {
+  const l = text.toLowerCase();
+  const candidates = [
+    ["Profit & Loss", ["profit", "loss", "sales", "revenue", "expenses", "operating"]],
+    ["Balance Sheet",  ["balance sheet", "assets", "liabilities", "equity"]],
+    ["Cash Flow",      ["cash flow", "operating activities", "financing activities"]]
+  ];
+  let best = "Profit & Loss", top = 0;
+  for (const [t, kws] of candidates) {
+    const s = kws.filter(k => l.includes(k)).length;
+    if (s > top) { best = t; top = s; }
+  }
+  return best;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 1 — cluster Tesseract words into visual rows
+// ─────────────────────────────────────────────────────────────────────────────
+function clusterIntoRows(words, yTol = 10) {
+  const rows = [];
+  for (const w of [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0)) {
+    const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+    const row = rows.find(r => Math.abs(r.cy - cy) < yTol);
+    if (row) {
+      row.words.push(w);
+      row.cy = row.words.reduce((s, x) => s + (x.bbox.y0 + x.bbox.y1) / 2, 0) / row.words.length;
+    } else {
+      rows.push({ cy, words: [w] });
+    }
+  }
+  rows.forEach(r => r.words.sort((a, b) => a.bbox.x0 - b.bbox.x0));
+  return rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2 — find the header row and extract column definitions
+// ─────────────────────────────────────────────────────────────────────────────
+function detectColumns(rows) {
+  for (let ri = 0; ri < rows.length; ri++) {
+    const ws = rows[ri].words;
+    const hasMonth = ws.some(w => MONTH_RE.test(w.text));
+    const hasTTM   = ws.some(w => /^TTM$/i.test(w.text));
+    if (!hasMonth && !hasTTM) continue;
+
+    const cols = [];
+    for (let i = 0; i < ws.length; i++) {
+      if (MONTH_RE.test(ws[i].text) && ws[i + 1] && YEAR_RE.test(ws[i + 1].text)) {
+        cols.push({
+          header:  `${ws[i].text} ${ws[i + 1].text}`,
+          centerX: (ws[i].bbox.x0 + ws[i + 1].bbox.x1) / 2,
+          x0: ws[i].bbox.x0, x1: ws[i + 1].bbox.x1
+        });
+        i++; // skip the year token
+      } else if (/^TTM$/i.test(ws[i].text)) {
+        cols.push({
+          header:  "TTM",
+          centerX: (ws[i].bbox.x0 + ws[i].bbox.x1) / 2,
+          x0: ws[i].bbox.x0, x1: ws[i].bbox.x1
+        });
+      }
+    }
+
+    if (cols.length >= 2) return { headerRowIdx: ri, columns: cols };
   }
   return null;
 }
 
-// ── Row type classification ───────────────────────────────────────────────────
-const TOTAL_LABELS = ["total", "net profit", "gross profit", "operating profit",
-  "profit before tax", "profit after tax", "ebitda", "net income", "net loss", "profit before"];
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3 — for a data row, map each numeric word to its nearest column
+// ─────────────────────────────────────────────────────────────────────────────
+function assignValuesToColumns(rowWords, columns, labelCutoffX) {
+  // dynamic tolerance = half the typical column spacing
+  const span = columns[columns.length - 1].centerX - columns[0].centerX;
+  const tol  = (span / (columns.length - 1)) * 0.6;
 
-function classifyRow(label) {
-  const lower = label.toLowerCase();
-  if (TOTAL_LABELS.some(s => lower.includes(s))) return "total";
-  if (lower.startsWith("sub-total") || lower.startsWith("subtotal")) return "subtotal";
-  return "line_item";
+  const nums = [];
+  for (const w of rowWords) {
+    if (PCT_RE.test(w.text)) continue;                    // skip percentages
+    const cx = (w.bbox.x0 + w.bbox.x1) / 2;
+    if (cx < labelCutoffX - 5) continue;                  // still in label area
+    const n = parseFloat(w.text.replace(/,/g, ""));
+    if (!isNaN(n)) nums.push({ n, cx });
+  }
+
+  const result   = columns.map(() => null);
+  const taken    = new Set();
+  // sort by distance first for greedy assignment
+  for (const { n, cx } of nums) {
+    let best = -1, bestDist = tol;
+    for (let i = 0; i < columns.length; i++) {
+      if (taken.has(i)) continue;
+      const d = Math.abs(cx - columns[i].centerX);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    if (best >= 0) { result[best] = n; taken.add(best); }
+  }
+  return result;
 }
 
-// ── Rows to always skip ───────────────────────────────────────────────────────
-const SKIP_LABEL_PATTERNS = [
-  /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(\s|$)/i,  // month headers
-  /^(fy|q[1-4]|ttm|quarter|annual|year)(\s|$)/i,                // period labels
-  /^(eps|earning per share|dividend payout|book value|face value)/i, // ratio rows
-  /^consolidated|standalone|rs\.?\s*crore/i                      // footnotes
-];
-
-function shouldSkipLabel(label) {
-  return SKIP_LABEL_PATTERNS.some(re => re.test(label.trim()));
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4 — extract label (words left of the first column)
+// ─────────────────────────────────────────────────────────────────────────────
+function extractLabel(rowWords, cutoffX) {
+  return rowWords
+    .filter(w => w.bbox.x1 < cutoffX - 5)
+    .map(w => w.text)
+    .join(" ")
+    .replace(/[+*©®™|<>:]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-// ── Core text → rows parser ───────────────────────────────────────────────────
-function parseOCRText(rawText) {
-  const lines = rawText.split("\n").map(l => l.trim()).filter(l => l.length > 1);
-  const rows = [];
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN RECONSTRUCTION
+// ─────────────────────────────────────────────────────────────────────────────
+function reconstructTable(words, fullText) {
+  const rows = clusterIntoRows(words);
+  const colInfo = detectColumns(rows);
+
+  if (!colInfo || colInfo.columns.length < 2) return null;
+
+  const { headerRowIdx, columns } = colInfo;
+  const cutoffX = columns[0].x0;         // label vs. value boundary
+  const tableRows = [];
   let currentSection = "General";
 
-  for (const line of lines) {
-    // ── 1. Skip lines dominated by percentages (OPM%, Tax%, Dividend%) ──
-    const percentCount = (line.match(/%/g) || []).length;
-    if (percentCount >= 2) continue; // row full of % values = ratio row, skip
+  for (let ri = 0; ri < rows.length; ri++) {
+    if (ri <= headerRowIdx) continue;
 
-    // ── 2. Find numbers NOT followed by % ──
-    const numberMatches = [...line.matchAll(/(-?[\d,]+(?:\.\d+)?)(?!%|\.\d)/g)]
-      .map(m => ({ val: parseFloat(m[0].replace(/,/g, "")), idx: m.index }))
-      .filter(m => !isNaN(m.val));
+    const rowWords = rows[ri].words;
+    if (!rowWords.length) continue;
 
-    if (numberMatches.length === 0) continue;
+    // skip rows dominated by %
+    const pcts = rowWords.filter(w => PCT_RE.test(w.text)).length;
+    if (pcts >= 2) continue;
 
-    // ── 3. Extract label (everything before first number) ──
-    const firstIdx = numberMatches[0].idx;
-    const rawLabel = line.substring(0, firstIdx)
-      .replace(/[+\-*©®™|<>:]+$/, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const label = extractLabel(rowWords, cutoffX);
+    if (!label || label.length < 2 || /^\d+$/.test(label)) continue;
+    if (SKIP_RE.test(label)) continue;
 
-    if (!rawLabel || rawLabel.length < 2 || /^\d+$/.test(rawLabel)) continue;
-    if (shouldSkipLabel(rawLabel)) continue;
+    const values = assignValuesToColumns(rowWords, columns, cutoffX);
+    if (!values.some(v => v !== null)) continue;
 
-    // ── 4. Use LAST number = most recent column ──
-    const amount = numberMatches[numberMatches.length - 1].val;
+    const sec = detectSection(label);
+    if (sec) currentSection = sec;
 
-    // ── 5. Section + type ──
-    const detectedSection = detectSection(rawLabel);
-    if (detectedSection) currentSection = detectedSection;
-
-    rows.push({
-      label: rawLabel,
-      amount,
-      section: currentSection,
-      row_type: classifyRow(rawLabel),
-      level: 1,
-      confidence: rawLabel.length < 3 ? 0.65 : 0.9,
-      issues: []
+    tableRows.push({
+      id:        crypto.randomUUID(),
+      label,
+      section:   currentSection,
+      row_type:  classifyRow(label),
+      values,                                                 // all years
+      amount:    [...values].reverse().find(v => v !== null) || 0, // latest for UI
+      level:     1,
+      confidence: 0.9,
+      issues:    []
     });
   }
 
-  return rows;
+  return tableRows.length ? { columns: columns.map(c => c.header), rows: tableRows } : null;
 }
 
-// ── Main entry point ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: processImages
+// ─────────────────────────────────────────────────────────────────────────────
 export async function processImages(files, onProgress) {
   const worker = await createWorker("eng", 1, {
-    logger: (m) => {
-      if (m.status === "recognizing text") onProgress?.(Math.round(m.progress * 100));
-    }
+    logger: m => { if (m.status === "recognizing text") onProgress?.(Math.round(m.progress * 100)); }
   });
 
   const allStatements = [];
@@ -120,13 +218,15 @@ export async function processImages(files, onProgress) {
     const url = URL.createObjectURL(file);
     try {
       const { data } = await worker.recognize(url);
-      const statementType = detectStatementType(data.text);
-      const rows = parseOCRText(data.text);
-      if (rows.length > 0) {
+      const stmtType  = detectStatementType(data.text);
+      const tableData = reconstructTable(data.words, data.text);
+
+      if (tableData) {
         allStatements.push({
           id: crypto.randomUUID(),
-          statement_type: statementType,
-          rows: rows.map(r => ({ ...r, id: crypto.randomUUID() }))
+          statement_type: stmtType,
+          rows: tableData.rows,
+          tableData
         });
       }
     } finally {
@@ -138,15 +238,48 @@ export async function processImages(files, onProgress) {
   return allStatements;
 }
 
-// ── Client-side Excel export ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: exportToExcel — full multi-year layout
+// ─────────────────────────────────────────────────────────────────────────────
 export function exportToExcel(statements) {
   const wb = XLSX.utils.book_new();
 
   for (const stmt of statements) {
-    const header = [["Section", "Line Item", "Amount (₹ Cr)", "Type"]];
-    const dataRows = stmt.rows.map(r => [r.section, r.label, r.amount, r.row_type]);
-    const ws = XLSX.utils.aoa_to_sheet([...header, ...dataRows]);
-    ws["!cols"] = [{ wch: 18 }, { wch: 36 }, { wch: 16 }, { wch: 12 }];
+    const td = stmt.tableData;
+
+    // header row: Line Item | Mar 2014 | Mar 2015 | … | TTM
+    const header = ["Line Item", ...(td ? td.columns : ["Amount (₹ Cr)"])];
+    const body   = (td ? td.rows : stmt.rows).map(r =>
+      td
+        ? [r.label, ...r.values.map(v => (v !== null && v !== undefined ? v : ""))]
+        : [r.label, r.amount]
+    );
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+
+    // column widths
+    ws["!cols"] = [{ wch: 28 }, ...(td ? td.columns : [""]).map(() => ({ wch: 11 }))];
+
+    // bold + fill header row
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (!ws[addr]) continue;
+      ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: "D9EAD3" } } };
+    }
+
+    // bold + light fill for total rows
+    body.forEach((row, idx) => {
+      const srcRow = (td ? td.rows : stmt.rows)[idx];
+      if (srcRow.row_type === "total") {
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const addr = XLSX.utils.encode_cell({ r: idx + 1, c });
+          if (!ws[addr]) continue;
+          ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: "FFF2CC" } } };
+        }
+      }
+    });
+
     XLSX.utils.book_append_sheet(wb, ws, stmt.statement_type.substring(0, 31));
   }
 
