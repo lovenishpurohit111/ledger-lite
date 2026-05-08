@@ -9,7 +9,7 @@ function assert(cond, label) {
 }
 
 // ── Shared extraction helpers (mirrors content.js logic) ──────────────────────
-const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{4}\b|\bFY\s*\d{2,4}\b|\bQ[1-4]\s*(?:FY)?\s*\d{2,4}\b|\b(TTM|LTM)\b|\b20\d{2}\b/i;
+const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*['`]?\s*\d{2,4}\b|\bFY\s*\d{2,4}\b|\bQ[1-4]\s*(?:FY)?\s*\d{2,4}\b|\b(TTM|LTM)\b|\b20\d{2}\b|\b\d+\s*mths?\b|\b\d+\s*months?\b/i;
 
 function findFinancialTables(document) {
   return [...document.querySelectorAll("table")].filter(t => {
@@ -193,6 +193,30 @@ assert(PERIOD_RE.test("TTM"),      "Matches 'TTM'");
 assert(PERIOD_RE.test("Q4 FY24"), "Matches 'Q4 FY24'");
 assert(!PERIOD_RE.test("Total"),  "Does not match 'Total'");
 assert(!PERIOD_RE.test("Sales"),  "Does not match 'Sales'");
+
+
+console.log("\n── Moneycontrol '12 mths' headers ──");
+const MC2_HTML = `<html><body>
+<div class="pcstname">HDFC Bank</div>
+<table>
+  <thead>
+    <tr><th>Particulars</th><th>12 mths</th><th>12 mths</th><th>12 mths</th></tr>
+    <tr><th></th><th>Mar '24</th><th>Mar '23</th><th>Mar '22</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Net Sales</td><td>2,39,761</td><td>1,66,817</td><td>1,41,163</td></tr>
+    <tr><td>Net Profit</td><td>60,812</td><td>44,109</td><td>36,961</td></tr>
+    <tr><td>EPS</td><td>80.12</td><td>59.05</td><td>50.08</td></tr>
+  </tbody>
+</table>
+</body></html>`;
+const mc2doc = new JSDOM(MC2_HTML).window.document;
+const mc2tables = findFinancialTables(mc2doc);
+assert(mc2tables.length === 1, "Moneycontrol '12 mths' table detected");
+const mc2data = extractTable(mc2tables[0]);
+assert(mc2data !== null, "Moneycontrol table extracted");
+assert(mc2data.headers.includes("12 mths"), "Headers include '12 mths'");
+assert(mc2data.rows.find(r => r[0] === "Net Profit") !== undefined, "Net Profit row found");
 
 // ── Summary ────────────────────────────────────────────────────────────────────
 console.log(`\n${"─".repeat(40)}`);

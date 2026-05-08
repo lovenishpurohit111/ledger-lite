@@ -10,7 +10,7 @@
     HOST.includes("moneycontrol.com") ? "moneycontrol" : "generic";
 
   // Matches any period header: "Mar 2024", "FY24", "Q4 FY24", "TTM", "2024"
-  const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{4}\b|\bFY\s*\d{2,4}\b|\bQ[1-4]\s*(?:FY)?\s*\d{2,4}\b|\b(TTM|LTM)\b|\b20\d{2}\b/i;
+  const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*[''`]?\s*\d{2,4}\b|\bFY\s*\d{2,4}\b|\bQ[1-4]\s*(?:FY)?\s*\d{2,4}\b|\b(TTM|LTM)\b|\b20\d{2}\b|\b\d+\s*mths?\b|\b\d+\s*months?\b/i;
 
   const STMT_PATTERNS = [
     { re: /profit\s*[&and]+\s*loss|income\s*statement|p\s*[&]\s*l/i, name: "Profit & Loss"  },
