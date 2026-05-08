@@ -62,7 +62,7 @@ function extractSection(document, sectionId) {
   const table = section.querySelector("table");
   if (!table) return null;
   const headerCells = table.querySelectorAll("thead tr th, thead tr td");
-  const headers = [...headerCells].map(th => th.textContent.trim()).filter(Boolean);
+  const headers = [...headerCells].map(th => th.textContent.trim());
   if (headers.length < 2) return null;
   const rows = [];
   table.querySelectorAll("tbody tr").forEach(tr => {
@@ -96,15 +96,15 @@ const { document } = dom.window;
 console.log("\n── Section extraction ──");
 const pl = extractSection(document, "profit-loss");
 assert(pl !== null, "P&L section found");
-assert(pl.headers.length === 5, `P&L headers: expected 5, got ${pl.headers.length}`);
-assert(pl.headers[0] === "Mar 2022", `First header is 'Mar 2022', got '${pl.headers[0]}'`);
-assert(pl.headers[4] === "TTM", `Last header is 'TTM', got '${pl.headers[4]}'`);
+assert(pl.headers.length === 6, `P&L headers: expected 6 (incl empty first), got ${pl.headers.length}`);
+assert(pl.headers[0] === "", `First header is empty (label col), got '${pl.headers[0]}'`);
+assert(pl.headers[5] === "TTM", `Last header is 'TTM', got '${pl.headers[5]}'`);
 assert(pl.rows.length === 12, `P&L has 12 rows, got ${pl.rows.length}`);
 assert(pl.unit === "Consolidated Figures in Rs. Crores", "Unit extracted correctly");
 
 const bs = extractSection(document, "balance-sheet");
 assert(bs !== null, "Balance Sheet section found");
-assert(bs.headers.length === 4, `BS headers: 4, got ${bs.headers.length}`);
+assert(bs.headers.length === 5, `BS headers: 5 (incl empty first), got ${bs.headers.length}`);
 
 const missing = extractSection(document, "cash-flow");
 assert(missing === null, "Cash Flow not present → returns null");

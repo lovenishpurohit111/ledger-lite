@@ -22,7 +22,7 @@
 
     // Header row — year columns
     const headerCells = table.querySelectorAll("thead tr th, thead tr td");
-    const headers = [...headerCells].map(th => th.textContent.trim()).filter(Boolean);
+    const headers = [...headerCells].map(th => th.textContent.trim());
     if (headers.length < 2) return null;
 
     // Data rows
