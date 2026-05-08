@@ -156,8 +156,7 @@ const safeParse = t => { const n=parseFloat((t||"").replace(/[,%]/g,"")); return
 const classify  = l => { const lo=l.toLowerCase(); return TOTAL_KW.some(k=>lo.includes(k))?"total":lo.startsWith("sub-total")||lo.startsWith("subtotal")?"subtotal":"line_item"; };
 const getSection= l => { const lo=l.toLowerCase(); for(const[s,kws]of Object.entries(SECTION_MAP)) if(kws.some(k=>lo.includes(k))) return s; return null; };
 const stmtType  = txt => { const l=txt.toLowerCase(); if(["balance sheet","assets","liabilities","equity"].filter(k=>l.includes(k)).length>=2) return "Balance Sheet"; if(["cash flow","operating activities","financing activities"].some(k=>l.includes(k))) return "Cash Flow"; return "Profit & Loss"; };
-const extractUnit = txt => { const m=txt.match(/figures?\s+in\s+[^
-.]+|in\s+rs\.?\s*\w+|rs\.?\s*(?:in\s+)?(?:crore|lakh|million|billion)[s]?(?:\s*\(.*?\))?/i); return m ? m[0].trim() : null; };
+const extractUnit = txt => { const m = txt.match(/(?:Consolidated )?Figures in Rs\.? \w+/i); return m ? m[0].trim() : 'Rs. Crores'; };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TABLE RECONSTRUCTION
