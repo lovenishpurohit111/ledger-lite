@@ -126,9 +126,10 @@ async function init() {
   }
 
   const url = tab?.url || "";
-  const onScreener = /screener\.in\/company\//i.test(url);
+  const host = new URL(url).hostname;
+  const onSupported = ["screener.in","tickertape.in","moneycontrol.com"].some(s => host.includes(s));
 
-  if (!onScreener) { renderNotSupported(); return; }
+  if (!onSupported) { renderNotSupported(); return; }
 
   try {
     const response = await chrome.tabs.sendMessage(tab.id, { action: "extractData" });
