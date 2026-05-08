@@ -434,6 +434,11 @@ function ReviewTable({ statement, updateRow, deleteRow, updateColValue }) {
     // ── Multi-year spreadsheet view ──────────────────────────────────────────
     return (
       <div className="overflow-x-auto">
+        {statement.unit && (
+          <div className="flex justify-end px-4 py-1.5 text-xs text-zinc-400 font-medium border-b border-zinc-100 bg-zinc-50/50">
+            <span className="flex items-center gap-1">📊 {statement.unit.replace(/^figures?\s+in\s+/i, "").replace(/^in\s+/i, "").replace(/\w/g, c => c.toUpperCase())}</span>
+          </div>
+        )}
         <table className="w-full text-left text-sm border-collapse">
           <thead className="bg-zinc-50 text-xs font-bold uppercase text-zinc-500 sticky top-0 z-10">
             <tr>
