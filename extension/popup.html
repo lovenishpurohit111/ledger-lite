@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FinXport</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      width: 320px;
+      background: #ffffff;
+      color: #1a1a2e;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: white;
+      padding: 16px 18px 14px;
+    }
+    .header-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .header-title span { color: #4ade80; }
+    .header-sub {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    .body { padding: 14px 16px 16px; }
+
+    /* Company card */
+    .company-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 11px 14px;
+      margin-bottom: 14px;
+    }
+    .company-name {
+      font-weight: 700;
+      font-size: 14px;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .company-ticker {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    /* Statements checklist */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+    }
+    .statements { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .stmt-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: #f1f5f9;
+      font-size: 13px;
+    }
+    .stmt-row.found { background: #f0fdf4; }
+    .stmt-row.missing { background: #fafafa; color: #94a3b8; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      background: #d1d5db;
+    }
+    .dot.found { background: #22c55e; }
+    .stmt-name { flex: 1; font-weight: 500; }
+    .stmt-rows { font-size: 11px; color: #64748b; }
+
+    /* Options */
+    .options { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .opt-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #475569; cursor: pointer;
+    }
+    .opt-row input { cursor: pointer; accent-color: #22c55e; }
+
+    /* Buttons */
+    .btn-export {
+      width: 100%;
+      padding: 12px;
+      background: #16a34a;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+    .btn-export:hover:not(:disabled) { background: #15803d; }
+    .btn-export:disabled { background: #86efac; cursor: not-allowed; }
+
+    /* Status */
+    .status {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      text-align: center;
+      display: none;
+    }
+    .status.error { background: #fef2f2; color: #dc2626; display: block; }
+    .status.success { background: #f0fdf4; color: #16a34a; display: block; }
+    .status.loading { background: #f0f9ff; color: #0284c7; display: block; }
+
+    /* Not on screener */
+    .not-supported {
+      padding: 24px 16px;
+      text-align: center;
+      color: #64748b;
+    }
+    .not-supported .icon { font-size: 32px; margin-bottom: 10px; }
+    .not-supported p { font-size: 13px; line-height: 1.5; }
+    .not-supported a { color: #22c55e; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-title">Fin<span>Xport</span></div>
+    <div class="header-sub">Financial Statements → Excel</div>
+  </div>
+
+  <div id="app" class="body">
+    <div class="not-supported">
+      <div class="icon">📊</div>
+      <p>Loading…</p>
+    </div>
+  </div>
+
+  <script src="xlsx.min.js"></script>
+  <script src="exporter.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
