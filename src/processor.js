@@ -338,7 +338,8 @@ export function exportToExcel(statements) {
     const yrs=td?td.columns:["Amount (₹ Cr)"];
     const hdr=["Line Item",...yrs];
     const body=(td?td.rows:stmt.rows).map(r=>[r.label,...(td?r.values.map(v=>v??[]):[r.amount])]);
-    const ws=XLSX.utils.aoa_to_sheet([hdr,...body]);
+    const unitRow=stmt.unit?[[stmt.unit,...yrs.map(()=>"")]]:[]; 
+    const ws=XLSX.utils.aoa_to_sheet([...unitRow,hdr,...body]);
     ws["!cols"]=[{wch:28},...yrs.map(()=>({wch:11}))];
     XLSX.utils.book_append_sheet(wb,ws,stmt.statement_type.substring(0,31));
   }
