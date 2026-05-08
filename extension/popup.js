@@ -10,8 +10,7 @@ function renderNotSupported() {
     <div class="not-supported">
       <div class="icon">📊</div>
       <p>Open a company page on<br>
-        <a href="https://www.screener.in" target="_blank">screener.in</a>
-        to export its financials to Excel.
+        <a href="https://www.screener.in" target="_blank">Screener.in</a>, <a href="https://www.tickertape.in" target="_blank">Tickertape</a> or <a href="https://www.moneycontrol.com" target="_blank">Moneycontrol</a> to export financials to Excel.
       </p>
     </div>
   `);
