@@ -17,7 +17,7 @@ function renderNotSupported() {
   `);
 }
 
-function renderMain(meta, statements) {
+function renderMain(meta, statements, tab_url = "") {
   const STMT_LIST = [
     { id: "profit-loss",   label: "Profit & Loss"  },
     { id: "balance-sheet", label: "Balance Sheet"  },
@@ -42,7 +42,10 @@ function renderMain(meta, statements) {
   render(`
     <div class="company-card">
       <div class="company-name">${escHtml(meta.name)}</div>
-      ${meta.ticker ? `<div class="company-ticker">${escHtml(meta.ticker)}</div>` : ""}
+      <div style="display:flex;align-items:center;gap:6px;margin-top:3px">
+        ${meta.ticker ? `<span class="company-ticker">${escHtml(meta.ticker)}</span>` : ""}
+        <span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:9px;font-weight:600">${escHtml(siteName(tab_url))}</span>
+      </div>
     </div>
 
     <div class="section-label">Statements detected</div>
@@ -106,6 +109,14 @@ function escHtml(str) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function siteName(url) {
+  if (!url) return "";
+  if (url.includes("screener.in"))      return "Screener.in";
+  if (url.includes("tickertape.in"))    return "Tickertape";
+  if (url.includes("moneycontrol.com")) return "Moneycontrol";
+  return "Web";
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   let tab;
@@ -146,7 +157,7 @@ async function init() {
       // Small delay then retry
       await new Promise(r => setTimeout(r, 300));
       const response2 = await chrome.tabs.sendMessage(tab.id, { action: "extractData" });
-      if (response2?.ok) { renderMain(response2.meta, response2.statements); return; }
+      if (response2?.ok) { renderMain(response2.meta, response2.statements, tab.url); return; }
     } catch {}
 
     render(`

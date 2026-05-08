@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "FinXport – Financial Statements to Excel",
-  "version": "1.0.0",
-  "description": "Export P&L, Balance Sheet and Cash Flow from Screener.in to a formatted Excel file in one click.",
+  "version": "1.1.0",
+  "description": "Export P&L, Balance Sheet and Cash Flow from Screener.in, Tickertape & Moneycontrol to Excel in one click.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": [
     "https://www.screener.in/*",
-    "https://screener.in/*"
+    "https://screener.in/*",
+    "https://www.tickertape.in/*",
+    "https://tickertape.in/*",
+    "https://www.moneycontrol.com/*",
+    "https://moneycontrol.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -18,7 +22,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.screener.in/company/*", "https://screener.in/company/*"],
+      "matches": [
+        "https://www.screener.in/company/*",
+        "https://screener.in/company/*",
+        "https://www.tickertape.in/stocks/*",
+        "https://tickertape.in/stocks/*",
+        "https://www.moneycontrol.com/financials/*",
+        "https://www.moneycontrol.com/stocks/*",
+        "https://www.moneycontrol.com/india/stockpricequote/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
