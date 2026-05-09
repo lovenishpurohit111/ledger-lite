@@ -1,61 +1,72 @@
-name: Publish Chrome Extension
+name: Publish Extension (Free)
 
 on:
   push:
     branches: [main]
-    paths:
-      - "extension/**"   # only runs when extension files change
+    paths: ["extension/**"]
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Auto-bump patch version in manifest.json (1.0.0 → 1.0.1 → 1.0.2 …)
+      # Auto-bump version
       - name: Bump version
-        id: version
+        id: ver
         run: |
           cd extension
           OLD=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
           IFS='.' read -r major minor patch <<< "$OLD"
           NEW="$major.$minor.$((patch + 1))"
           python3 -c "
-          import json
-          m = json.load(open('manifest.json'))
-          m['version'] = '$NEW'
-          json.dump(m, open('manifest.json','w'), indent=2)
-          "
-          echo "new_version=$NEW" >> $GITHUB_OUTPUT
-          echo "Bumped $OLD → $NEW"
+import json
+m = json.load(open('manifest.json'))
+m['version'] = '$NEW'
+json.dump(m, open('manifest.json','w'), indent=2)
+"
+          echo "version=$NEW" >> $GITHUB_OUTPUT
 
-      - name: Commit bumped version
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add extension/manifest.json
-          git commit -m "chore: bump extension version to ${{ steps.version.outputs.new_version }} [skip ci]"
-          git push
-
-      # Zip only the extension folder (exclude dev files)
+      # Build ZIP
       - name: Build ZIP
         run: |
           cd extension
-          zip -r ../finxport.zip . \
-            --exclude "test.cjs" \
-            --exclude "*.map" \
-            --exclude "node_modules/*"
-          echo "ZIP size: $(du -sh ../finxport.zip | cut -f1)"
+          zip -r ../finxport-${{ steps.ver.outputs.version }}.zip . \
+            --exclude "test.cjs" --exclude "*.map"
 
-      # Publish to Chrome Web Store
-      - name: Publish to Chrome Web Store
-        uses: mnao305/chrome-extension-upload@v4.0.1
+      # Create GitHub Release (free — always latest ZIP available)
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          file-path: finxport.zip
-          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
-          client-id: ${{ secrets.CWS_CLIENT_ID }}
-          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
-          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
-          publish: true   # set to false to upload as draft first
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: FinXport v${{ steps.ver.outputs.version }}
+          body: |
+            ### What changed
+            Auto-built from latest commit.
+
+            ### Install
+            **Chrome:** Download ZIP → `chrome://extensions` → Developer mode → Load unpacked
+            **Firefox:** Download ZIP → `about:debugging` → Load Temporary Add-on
+          files: finxport-${{ steps.ver.outputs.version }}.zip
+          token: ${{ secrets.GITHUB_TOKEN }}   # Built-in — no setup needed!
+
+      # Publish to Firefox Add-ons (FREE, no credit card)
+      - name: Publish to Firefox Add-ons
+        if: ${{ secrets.FIREFOX_API_KEY != '' }}
+        run: |
+          pip install web-ext-submit 2>/dev/null || pip install jwt requests
+          npx web-ext sign \
+            --source-dir extension \
+            --api-key ${{ secrets.FIREFOX_API_KEY }} \
+            --api-secret ${{ secrets.FIREFOX_API_SECRET }} \
+            --channel listed
+        continue-on-error: true
+
+      # Commit bumped version back
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add extension/manifest.json
+          git diff --staged --quiet || git commit -m "chore: bump to v${{ steps.ver.outputs.version }} [skip ci]"
+          git push
