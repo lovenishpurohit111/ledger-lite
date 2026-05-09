@@ -223,3 +223,25 @@ console.log(`\n${"─".repeat(40)}`);
 console.log(`Passed: ${passed}  |  Failed: ${failed}`);
 if (failed > 0) { console.error("❌ Tests failed — DO NOT push"); process.exit(1); }
 else console.log("✅ All tests passed — safe to push");
+
+// ── Test: detectStmtType reads table's own first <th> ─────────────────────────
+console.log("\n── Statement type from table's own header ──");
+const INNER_TH_HTML = `<html><body><table>
+  <thead>
+    <tr><th>BALANCE SHEET OF HDFC BANK (in Rs. Cr.)</th><th>MAR 26</th><th>MAR 25</th><th>MAR 24</th></tr>
+    <tr><th></th><th>12 mths</th><th>12 mths</th><th>12 mths</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Equity Capital</td><td>1,539.34</td><td>765.22</td><td>759.69</td></tr>
+    <tr><td>Total Assets</td><td>38,20,044</td><td>36,20,440</td><td>25,70,072</td></tr>
+    <tr><td>Total Liabilities</td><td>38,20,044</td><td>36,20,440</td><td>25,70,072</td></tr>
+  </tbody>
+</table></body></html>`;
+const itDoc = new JSDOM(INNER_TH_HTML).window.document;
+const itTables = findFinancialTables(itDoc);
+assert(itTables.length === 1, "Moneycontrol BS table found");
+const itData = extractTable(itTables[0]);
+assert(itData !== null, "Table extracted");
+assert(PERIOD_RE.test("MAR 26"), "MAR 26 matches PERIOD_RE");
+assert(PERIOD_RE.test("12 mths"), "12 mths matches PERIOD_RE");
+assert(itData.rows.length >= 3, `at least 3 data rows, got ${itData.rows.length}`);

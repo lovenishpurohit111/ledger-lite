@@ -20,17 +20,28 @@
   ];
 
   function detectStmtType(el) {
+    // Check inside the table first (e.g. Moneycontrol puts title in first <th>)
+    if (el && el.querySelectorAll) {
+      const firstCell = el.querySelector("th,caption");
+      if (firstCell) {
+        for (const { re, name } of STMT_PATTERNS) if (re.test(firstCell.textContent)) return name;
+      }
+    }
+    // Walk upward to find headings
     let cur = el;
     for (let i = 0; i < 8; i++) {
       cur = cur.previousElementSibling || cur.parentElement;
       if (!cur) break;
       const nodes = cur.matches && cur.matches("h1,h2,h3,h4,h5,h6,caption") ? [cur] : [];
-      if (cur.querySelectorAll) nodes.push(...cur.querySelectorAll("h1,h2,h3,h4,h5,h6,caption"));
+      if (cur.querySelectorAll) nodes.push(...cur.querySelectorAll("h1,h2,h3,h4,h5,h6,caption,th"));
       for (const h of nodes) {
         const t = h.textContent.trim();
         for (const { re, name } of STMT_PATTERNS) if (re.test(t)) return name;
       }
     }
+    // Last resort: check the page title
+    const title = (typeof document !== "undefined" ? document.title : "").toLowerCase();
+    for (const { re, name } of STMT_PATTERNS) if (re.test(title)) return name;
     return "Financial Statement";
   }
 

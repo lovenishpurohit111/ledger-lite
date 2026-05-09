@@ -17,23 +17,31 @@ function renderNotSupported() {
 }
 
 function renderMain(meta, statements, tab_url = "") {
-  const STMT_LIST = [
-    { id: "profit-loss",   label: "Profit & Loss"  },
-    { id: "balance-sheet", label: "Balance Sheet"  },
-    { id: "cash-flow",     label: "Cash Flow"      },
-    { id: "quarters",      label: "Quarterly"      },
+  // Build display list from BOTH hardcoded expected + actually found keys
+  const EXPECTED = [
+    { id: "profit-loss",   label: "Profit & Loss" },
+    { id: "balance-sheet", label: "Balance Sheet" },
+    { id: "cash-flow",     label: "Cash Flow"     },
+    { id: "quarters",      label: "Quarterly"     },
   ];
 
-  const foundCount = STMT_LIST.filter(s => statements[s.id]).length;
+  // Merge: show expected slots + any extra keys found by universal detector
+  const allKeys = [...new Set([...EXPECTED.map(e=>e.id), ...Object.keys(statements)])];
+  const STMT_LIST = allKeys.map(id => {
+    const expected = EXPECTED.find(e => e.id === id);
+    const data = statements[id];
+    return { id, label: expected?.label || data?.name || id, data };
+  });
+
+  const foundCount = STMT_LIST.filter(s => s.data).length;
 
   const stmtRows = STMT_LIST.map(s => {
-    const data = statements[s.id];
-    const found = !!data;
-    const rowCount = data ? data.rows.length : 0;
+    const found = !!s.data;
+    const rowCount = s.data?.rows?.length || 0;
     return `
       <div class="stmt-row ${found ? "found" : "missing"}">
         <div class="dot ${found ? "found" : ""}"></div>
-        <span class="stmt-name">${s.label}</span>
+        <span class="stmt-name">${escHtml(s.label)}</span>
         ${found ? `<span class="stmt-rows">${rowCount} rows</span>` : ""}
       </div>`;
   }).join("");
@@ -71,9 +79,12 @@ function renderMain(meta, statements, tab_url = "") {
   document.getElementById("btn-export")?.addEventListener("click", () => {
     const includeQuarterly = document.getElementById("opt-quarterly")?.checked;
 
-    // Filter statements based on options
-    const filtered = { ...statements };
-    if (!includeQuarterly) delete filtered.quarters;
+    // Filter out quarterly unless opted in
+    const filtered = Object.fromEntries(
+      Object.entries(statements).filter(([k, v]) =>
+        includeQuarterly || !(k === "quarters" || (v?.name||"").toLowerCase().includes("quarter"))
+      )
+    );
 
     doExport(meta, filtered);
   });
