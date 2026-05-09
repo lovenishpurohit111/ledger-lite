@@ -4,7 +4,6 @@
 const app = document.getElementById("app");
 
 function render(html) {
-  // Use DOMParser for safe rendering instead of raw innerHTML
   const doc = new DOMParser().parseFromString(html, "text/html");
   app.replaceChildren(...doc.body.childNodes);
 }
