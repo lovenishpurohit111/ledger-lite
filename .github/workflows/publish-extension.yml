@@ -1,0 +1,61 @@
+name: Publish Chrome Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extension/**"   # only runs when extension files change
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Auto-bump patch version in manifest.json (1.0.0 → 1.0.1 → 1.0.2 …)
+      - name: Bump version
+        id: version
+        run: |
+          cd extension
+          OLD=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+          IFS='.' read -r major minor patch <<< "$OLD"
+          NEW="$major.$minor.$((patch + 1))"
+          python3 -c "
+          import json
+          m = json.load(open('manifest.json'))
+          m['version'] = '$NEW'
+          json.dump(m, open('manifest.json','w'), indent=2)
+          "
+          echo "new_version=$NEW" >> $GITHUB_OUTPUT
+          echo "Bumped $OLD → $NEW"
+
+      - name: Commit bumped version
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add extension/manifest.json
+          git commit -m "chore: bump extension version to ${{ steps.version.outputs.new_version }} [skip ci]"
+          git push
+
+      # Zip only the extension folder (exclude dev files)
+      - name: Build ZIP
+        run: |
+          cd extension
+          zip -r ../finxport.zip . \
+            --exclude "test.cjs" \
+            --exclude "*.map" \
+            --exclude "node_modules/*"
+          echo "ZIP size: $(du -sh ../finxport.zip | cut -f1)"
+
+      # Publish to Chrome Web Store
+      - name: Publish to Chrome Web Store
+        uses: mnao305/chrome-extension-upload@v4.0.1
+        with:
+          file-path: finxport.zip
+          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          publish: true   # set to false to upload as draft first
