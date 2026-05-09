@@ -237,17 +237,21 @@ function App() {
             </div>
           </div>
           <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-600">
-            {["Upload", "Review", "Export"].map((step, index) => (
-              <span key={step} className={`px-5 py-2 ${workflowIndex(job) >= index ? "bg-white text-emerald-800" : ""}`}>
-                {step}
-              </span>
+            {[["Upload","upload"],["Review","review"],["Export","export"]].map(([label, id], index) => (
+              <button
+                key={label}
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior:"smooth", block:"start" })}
+                className={`px-5 py-2 transition-colors ${workflowIndex(job) >= index ? "bg-white text-emerald-800" : "hover:bg-zinc-100"}`}
+              >
+                {label}
+              </button>
             ))}
           </div>
         </div>
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-6 px-5 py-6 xl:grid-cols-[360px_1fr]">
-        <aside className="space-y-4">
+        <aside id="upload" className="space-y-4">
           <section
             onDragOver={(event) => {
               event.preventDefault();
