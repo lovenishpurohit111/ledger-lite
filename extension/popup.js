@@ -140,12 +140,7 @@ async function init() {
   }
 
   const url = tab?.url || "";
-  const host = new URL(url).hostname;
-  const onSupported = ["screener.in","tickertape.in","moneycontrol.com"].some(s => host.includes(s));
-
-  if (!onSupported) { renderNotSupported(); return; }
-
-  // ── PDF support ──────────────────────────────────────────────────────────
+  // ── PDF support (check BEFORE site filter) ──────────────────────────────────────────────────────────
   if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?") || url.includes("/pdf")) {
     render(`
       <div class="company-card" style="margin-bottom:12px">
@@ -180,6 +175,10 @@ async function init() {
     });
     return;
   }
+
+  const host = new URL(url).hostname;
+  const onSupported = ["screener.in","tickertape.in","moneycontrol.com"].some(s => host.includes(s));
+  if (!onSupported) { renderNotSupported(); return; }
 
   try {
     const response = await chrome.tabs.sendMessage(tab.id, { action: "extractData" });

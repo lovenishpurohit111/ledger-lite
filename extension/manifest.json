@@ -14,7 +14,8 @@
     "https://tickertape.in/*",
     "https://www.moneycontrol.com/*",
     "https://moneycontrol.com/*",
-    "<all_urls>"
+    "<all_urls>",
+    "file:///*"
   ],
   "action": {
     "default_popup": "popup.html",
