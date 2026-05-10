@@ -13,7 +13,8 @@
     "https://www.tickertape.in/*",
     "https://tickertape.in/*",
     "https://www.moneycontrol.com/*",
-    "https://moneycontrol.com/*"
+    "https://moneycontrol.com/*",
+    "<all_urls>"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -60,5 +61,17 @@
     "gecko_android": {
       "strict_min_version": "142.0"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pdf.min.mjs",
+        "pdf.worker.min.mjs",
+        "pdf-extractor.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

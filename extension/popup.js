@@ -145,6 +145,42 @@ async function init() {
 
   if (!onSupported) { renderNotSupported(); return; }
 
+  // ── PDF support ──────────────────────────────────────────────────────────
+  if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?") || url.includes("/pdf")) {
+    render(`
+      <div class="company-card" style="margin-bottom:12px">
+        <div class="company-name">PDF detected</div>
+        <div class="company-ticker">${escHtml(url.split("/").pop().split("?")[0])}</div>
+      </div>
+      <p style="font-size:12px;color:#475569;margin-bottom:12px;line-height:1.5">
+        Click below to extract financial tables from this PDF using PDF.js.
+      </p>
+      <button class="btn-export" id="btn-pdf">📄 Extract from PDF</button>
+      <div class="status" id="status"></div>
+    `);
+    document.getElementById("btn-pdf").addEventListener("click", async () => {
+      const btn = document.getElementById("btn-pdf");
+      const status = document.getElementById("status");
+      btn.disabled = true;
+      btn.textContent = "Extracting… (may take 10–20s)";
+      status.className = "status loading";
+      status.textContent = "Loading PDF.js and reading pages…";
+      try {
+        // Inject pdf-extractor into the popup context
+        await import(chrome.runtime.getURL("pdf-extractor.js"));
+        const result = await window.extractPDF(url);
+        if (!result.ok) throw new Error("No financial tables found in this PDF.");
+        renderMain(result.meta, result.statements, url);
+      } catch (err) {
+        status.className = "status error";
+        status.textContent = "❌ " + err.message;
+        btn.disabled = false;
+        btn.textContent = "📄 Try again";
+      }
+    });
+    return;
+  }
+
   try {
     const response = await chrome.tabs.sendMessage(tab.id, { action: "extractData" });
 
