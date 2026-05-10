@@ -51,15 +51,19 @@ function buildSheet(stmtData, addGrowth = true) {
     sheetRows.push([label, ...values]);
   }
 
-  // ── Add YoY growth rows (only if requested) ──────────────────────────────
-  if (!addGrowth) return sheetRows;
+  // ── Add YoY growth rows (only for P&L, only if requested) ──────────────
+  const isPL = /profit.*loss|income.*statement/i.test(name || "");
+  if (!addGrowth || !isPL) return sheetRows;
   const dataStartIdx = unit ? 2 : 1;
   const yearCount = headers.length - 1;
   const growthRows = [];
 
   for (let ri = dataStartIdx; ri < sheetRows.length; ri++) {
     const label = sheetRows[ri][0] || "";
-    if (!isTotal(label) && label.toLowerCase() !== "sales" && label.toLowerCase() !== "revenue") continue;
+    const lbl = label.toLowerCase();
+    const wantGrowth = ["sales","revenue","net profit","operating profit","profit before tax","profit after tax","ebitda","net income","total revenue"]
+      .some(k => lbl.startsWith(k) || lbl === k);
+    if (!wantGrowth) continue;
     if (sheetRows[ri].slice(1).some(v => typeof v !== "number")) continue;
 
     const growth = [label + " YoY %"];
