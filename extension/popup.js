@@ -140,43 +140,75 @@ async function init() {
   }
 
   const url = tab?.url || "";
-  // ── PDF support (check BEFORE site filter) ──────────────────────────────────────────────────────────
+  // ── PDF support (check BEFORE site filter)
   if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?") || url.includes("/pdf")) {
+    const filename = url.split("/").pop().split("?")[0];
     render(`
       <div class="company-card" style="margin-bottom:12px">
-        <div class="company-name">PDF detected</div>
-        <div class="company-ticker">${escHtml(url.split("/").pop().split("?")[0])}</div>
+        <div class="company-name">PDF Detected</div>
+        <div class="company-ticker" style="word-break:break-all;font-size:10px">${escHtml(filename)}</div>
       </div>
-      <p style="font-size:12px;color:#475569;margin-bottom:12px;line-height:1.5">
-        Click below to extract financial tables from this PDF using PDF.js.
-      </p>
-      <button class="btn-export" id="btn-pdf">📄 Extract from PDF</button>
+      <div class="status loading" id="page-status" style="display:block;margin-bottom:10px">Loading PDF info...</div>
+      <div id="range-ui" style="display:none">
+        <div class="section-label" style="margin-bottom:6px">Select page range</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="flex:1">
+            <div style="font-size:11px;color:#64748b;margin-bottom:3px">From page</div>
+            <input id="pg-from" type="number" min="1" value="1" style="width:100%;border:1px solid #e2e8f0;border-radius:7px;padding:6px 8px;font-size:13px"/>
+          </div>
+          <div style="padding-top:16px;color:#94a3b8">to</div>
+          <div style="flex:1">
+            <div style="font-size:11px;color:#64748b;margin-bottom:3px">To page</div>
+            <input id="pg-to" type="number" min="1" value="1" style="width:100%;border:1px solid #e2e8f0;border-radius:7px;padding:6px 8px;font-size:13px"/>
+          </div>
+          <div style="padding-top:16px">
+            <div style="font-size:11px;color:#64748b;margin-bottom:3px">Total</div>
+            <div id="pg-total" style="font-size:13px;font-weight:700;color:#0f172a">?</div>
+          </div>
+        </div>
+        <p style="font-size:11px;color:#94a3b8;margin-bottom:10px;line-height:1.4">
+          Tip: check the PDF table of contents for P&L / Balance Sheet page numbers.
+        </p>
+        <button class="btn-export" id="btn-pdf">Extract Pages</button>
+      </div>
       <div class="status" id="status"></div>
     `);
-    document.getElementById("btn-pdf").addEventListener("click", async () => {
+    try {
+      await import(chrome.runtime.getURL("pdf-extractor.js"));
+      const total = await window.getPDFPageCount(url);
+      document.getElementById("page-status").style.display = "none";
+      document.getElementById("range-ui").style.display = "block";
+      document.getElementById("pg-to").value = total;
+      document.getElementById("pg-total").textContent = total;
+      document.getElementById("pg-from").max = total;
+      document.getElementById("pg-to").max = total;
+    } catch {
+      document.getElementById("page-status").className = "status error";
+      document.getElementById("page-status").textContent = "Could not read PDF. Try downloading it first.";
+    }
+    document.getElementById("btn-pdf")?.addEventListener("click", async () => {
       const btn = document.getElementById("btn-pdf");
       const status = document.getElementById("status");
+      const from = Math.max(1, parseInt(document.getElementById("pg-from").value)||1);
+      const to = parseInt(document.getElementById("pg-to").value)||from;
       btn.disabled = true;
-      btn.textContent = "Extracting… (may take 10–20s)";
-      status.className = "status loading";
-      status.textContent = "Loading PDF.js and reading pages…";
+      btn.textContent = "Extracting pages " + from + " to " + to + "...";
+      status.className = "status loading"; status.style.display = "block";
+      status.textContent = "Reading " + (to-from+1) + " page(s)...";
       try {
-        // Inject pdf-extractor into the popup context
-        await import(chrome.runtime.getURL("pdf-extractor.js"));
-        const result = await window.extractPDF(url);
-        if (!result.ok) throw new Error("No financial tables found in this PDF.");
+        const result = await window.extractPDF(url, from, to);
+        if (!result.ok) throw new Error("No financial tables found in pages " + from + "-" + to + ". Try a wider range.");
         renderMain(result.meta, result.statements, url);
       } catch (err) {
         status.className = "status error";
-        status.textContent = "❌ " + err.message;
-        btn.disabled = false;
-        btn.textContent = "📄 Try again";
+        status.textContent = err.message;
+        btn.disabled = false; btn.textContent = "Try again";
       }
     });
     return;
   }
 
-  const host = new URL(url).hostname;
+    const host = new URL(url).hostname;
   const onSupported = ["screener.in","tickertape.in","moneycontrol.com"].some(s => host.includes(s));
   if (!onSupported) { renderNotSupported(); return; }
 

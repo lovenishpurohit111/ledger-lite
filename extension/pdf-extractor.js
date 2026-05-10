@@ -104,7 +104,16 @@ function parseFinancialText(pages) {
 }
 
 // Main: extract text from PDF URL using PDF.js
-async function extractPDF(url) {
+async function getPDFPageCount(url) {
+  const pdfjsLib = await import(chrome.runtime.getURL("pdf.min.mjs"));
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.mjs");
+  const response = await fetch(url);
+  const buffer = await response.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  return pdf.numPages;
+}
+
+async function extractPDF(url, fromPage = 1, toPage = null) {
   const pdfjsLib = await import(chrome.runtime.getURL("pdf.min.mjs"));
   pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.mjs");
 
@@ -113,7 +122,8 @@ async function extractPDF(url) {
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
   const pages = [];
-  for (let i = 1; i <= Math.min(pdf.numPages, 50); i++) {
+  const endPage = toPage ? Math.min(toPage, pdf.numPages) : Math.min(pdf.numPages, 50);
+  for (let i = fromPage; i <= endPage; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     // Sort items by y then x for proper reading order
@@ -134,3 +144,4 @@ async function extractPDF(url) {
 }
 
 window.extractPDF = extractPDF;
+window.getPDFPageCount = getPDFPageCount;
