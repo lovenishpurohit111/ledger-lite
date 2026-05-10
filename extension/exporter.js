@@ -76,10 +76,10 @@ function buildSheet(stmtData) {
 function exportToExcel(meta, statements) {
   const wb = XLSX.utils.book_new();
 
-  const order = ["profit-loss", "balance-sheet", "cash-flow", "quarters"];
-  const stmtList = order
-    .filter(id => statements[id])
-    .map(id => statements[id]);
+  // Preferred order for sheet tabs; fall back to any detected key
+  const PREFERRED = ["profit-loss","balance-sheet","cash-flow","quarters"];
+  const allKeys = [...new Set([...PREFERRED, ...Object.keys(statements)])];
+  const stmtList = allKeys.filter(id => statements[id]).map(id => statements[id]);
 
   if (!stmtList.length) throw new Error("No financial statements found on this page.");
 
