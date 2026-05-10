@@ -103,7 +103,8 @@ function doExport(meta, statements) {
   status.textContent = "Building workbook…";
 
   try {
-    exportToExcel(meta, statements);
+    const addGrowth = document.getElementById("opt-growth")?.checked ?? true;
+    exportToExcel(meta, statements, addGrowth);
     status.className = "status success";
     status.textContent = "✅ Downloaded successfully!";
     btn.textContent = "⬇ Export again";

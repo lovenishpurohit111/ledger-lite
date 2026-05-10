@@ -23,7 +23,7 @@ function cleanNum(val) {
   return isNaN(n) ? s : n;
 }
 
-function buildSheet(stmtData) {
+function buildSheet(stmtData, addGrowth = true) {
   const { unit, name } = stmtData;
 
   // Normalise: PDF uses {columns, rows:{label,values}} — web uses {headers, rows:[arrays]}
@@ -51,7 +51,8 @@ function buildSheet(stmtData) {
     sheetRows.push([label, ...values]);
   }
 
-  // ── Add YoY growth rows for key numeric metrics ───────────────────────────
+  // ── Add YoY growth rows (only if requested) ──────────────────────────────
+  if (!addGrowth) return sheetRows;
   const dataStartIdx = unit ? 2 : 1;
   const yearCount = headers.length - 1;
   const growthRows = [];
@@ -82,7 +83,7 @@ function buildSheet(stmtData) {
   return sheetRows;
 }
 
-function exportToExcel(meta, statements) {
+function exportToExcel(meta, statements, addGrowth = true) {
   const wb = XLSX.utils.book_new();
 
   // Preferred order for sheet tabs; fall back to any detected key
@@ -93,7 +94,7 @@ function exportToExcel(meta, statements) {
   if (!stmtList.length) throw new Error("No financial statements found on this page.");
 
   for (const stmt of stmtList) {
-    const sheetData = buildSheet(stmt);
+    const sheetData = buildSheet(stmt, addGrowth);
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
     // Column widths

@@ -1,3 +1,5 @@
+
+function cleanHeader(h) { return (h||'').replace(/^[`'"\s´]+|[`'"\s´]+$/g,'').trim(); }
 // pdf-extractor.js — position-aware PDF table extractor
 
 const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,.\s]*['`]?\s*\d{2,4}\b|\bFY\s*\d{2,4}\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,.\s]*\d{4}\b|\b20\d{2}\b|\b(TTM|LTM)\b|\b\d+\s*mths?\b/i;
@@ -98,7 +100,7 @@ function detectColumns(rows) {
         if (nearby) fullText = nearby.text + " " + fullText;
       }
 
-      merged.push({ header: fullText.trim(), cx });
+      merged.push({ header: cleanHeader(fullText), cx });
     }
 
     if (merged.length >= 2) return { colRowIdx: ri, columns: merged };
@@ -106,7 +108,7 @@ function detectColumns(rows) {
     // Also detect plain years (2024, 2025) as columns
     const yearItems = row.items.filter(i => /^20\d{2}$/.test(i.text));
     if (yearItems.length >= 2) {
-      return { colRowIdx: ri, columns: yearItems.map(i => ({ header: i.text, cx: i.x + i.w/2 })) };
+      return { colRowIdx: ri, columns: yearItems.map(i => ({ header: cleanHeader(i.text), cx: i.x + i.w/2 })) };
     }
   }
   return null;
@@ -203,7 +205,7 @@ function extractTablesFromItems(allItems) {
     }
   }
 
-  return merged.length >= 3 ? { columns: columns.map(c => c.header), rows: merged } : null;
+  return merged.length >= 3 ? { columns: columns.map(c => cleanHeader(c.header)), rows: merged } : null;
 }
 
 function detectStmtName(items) {
