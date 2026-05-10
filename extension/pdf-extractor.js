@@ -233,10 +233,31 @@ function detectUnit(items) {
   return m ? m[0].trim() : null;
 }
 
-async function extractPDF(url, fromPage = 1, toPage = null) {
+async function extractPDF(url, fromPage = 1, toPage = null, geminiKey = "") {
   const lib = await loadPDFJS();
   const pdf = await lib.getDocument({ data: await fetchPDF(url) }).promise;
   const endPage = toPage ? Math.min(toPage, pdf.numPages) : Math.min(pdf.numPages, fromPage + 49);
+
+  // ── Gemini Vision path (better accuracy) ─────────────────────────────────
+  if (geminiKey) {
+    try {
+      const base64Images = [];
+      for (let p = fromPage; p <= endPage; p++) {
+        base64Images.push(await renderPageToBase64(pdf, p));
+        // Gemini accepts max 16 images per request
+        if (base64Images.length === 16) break;
+      }
+      const result = await extractWithGemini(base64Images, geminiKey);
+      if (result.ok) {
+        const firstItems = await getPageItems(pdf, fromPage);
+        const firstLines = clusterRows(firstItems).map(r => r.items.map(i=>i.text).join(" "));
+        const co = firstLines.find(l => /Ltd|Limited|Industries|Bank|Corp|Inc/i.test(l) && l.length < 80);
+        return { ok: true, meta: { name: co || "Company", ticker: "" }, statements: result.statements };
+      }
+    } catch (err) {
+      console.warn("Gemini extraction failed, falling back to text:", err.message);
+    }
+  }
 
   const statements = {};
   let currentStmt = null;
@@ -280,3 +301,79 @@ async function extractPDF(url, fromPage = 1, toPage = null) {
 
 window.extractPDF = extractPDF;
 window.getPDFPageCount = getPDFPageCount;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GEMINI VISION EXTRACTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function renderPageToBase64(pdf, pageNum) {
+  const page = await pdf.getPage(pageNum);
+  const vp = page.getViewport({ scale: 2.5 }); // 2.5x for clarity
+  const canvas = document.createElement("canvas");
+  canvas.width = vp.width;
+  canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+  return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+}
+
+async function extractWithGemini(base64Images, apiKey) {
+  const prompt = `You are a financial statement expert. These are pages from an annual report PDF.
+Extract ALL financial tables visible (P&L, Balance Sheet, Cash Flow, Changes in Equity, etc.).
+
+Return ONLY valid JSON with this structure — no markdown, no explanation:
+{
+  "statements": [
+    {
+      "name": "Balance Sheet",
+      "columns": ["As at 31st March 2025", "As at 31st March 2024"],
+      "rows": [
+        { "label": "Property Plant and Equipment", "values": [17428.89, 23082.33], "row_type": "line_item" },
+        { "label": "TOTAL ASSETS", "values": [88090.68, 91826.16], "row_type": "total" }
+      ],
+      "unit": "Rs. Crores"
+    }
+  ]
+}
+
+Rules:
+- row_type: "header" for section titles (ASSETS, LIABILITIES etc), "total" for TOTAL rows, "line_item" for everything else
+- Parenthetical values like (1510.46) = negative: -1510.46
+- Include ALL rows including section headers
+- For Changes in Equity: flatten multi-level headers into single column names
+- Skip note reference numbers (3A, 22, etc.) from values
+- Include ALL statements visible across ALL pages provided`;
+
+  const parts = [
+    { text: prompt },
+    ...base64Images.map(b64 => ({ inlineData: { mimeType: "image/jpeg", data: b64 } }))
+  ];
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+      })
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini error ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const clean = text.replace(/```json\n?|\n?```/g, "").trim();
+
+  const parsed = JSON.parse(clean);
+  const statements = {};
+  for (const stmt of parsed.statements || []) {
+    const key = (stmt.name || "statement").toLowerCase().replace(/[^a-z]/g, "-");
+    statements[key] = stmt;
+  }
+  return { ok: Object.keys(statements).length > 0, statements };
+}

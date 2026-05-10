@@ -5,7 +5,8 @@
   "description": "Export P&L, Balance Sheet and Cash Flow from Screener.in, Tickertape & Moneycontrol to Excel in one click.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://www.screener.in/*",

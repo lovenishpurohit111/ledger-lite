@@ -144,10 +144,20 @@ async function init() {
   // ── PDF support (check BEFORE site filter)
   if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?") || url.includes("/pdf")) {
     const filename = url.split("/").pop().split("?")[0];
+    // Load saved API key
+    const saved = await chrome.storage.local.get("geminiKey");
+    const savedKey = saved.geminiKey || "";
+
     render(`
       <div class="company-card" style="margin-bottom:12px">
         <div class="company-name">PDF Detected</div>
         <div class="company-ticker" style="word-break:break-all;font-size:10px">${escHtml(filename)}</div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div class="section-label" style="margin-bottom:4px">Gemini API Key <span style="color:#22c55e;font-weight:400">(optional — better accuracy)</span></div>
+        <input id="gemini-key" type="password" placeholder="AIza... (leave blank to use text extraction)"
+          value="${escHtml(savedKey)}"
+          style="width:100%;border:1px solid #e2e8f0;border-radius:7px;padding:6px 10px;font-size:12px;outline:none"/>
       </div>
       <div class="status loading" id="page-status" style="display:block;margin-bottom:10px">Loading PDF info...</div>
       <div id="range-ui" style="display:none">
@@ -197,7 +207,9 @@ async function init() {
       status.className = "status loading"; status.style.display = "block";
       status.textContent = "Reading " + (to-from+1) + " page(s)...";
       try {
-        const result = await window.extractPDF(url, from, to);
+        const geminiKey = document.getElementById("gemini-key")?.value?.trim() || "";
+        if (geminiKey) await chrome.storage.local.set({ geminiKey });
+        const result = await window.extractPDF(url, from, to, geminiKey);
         if (!result.ok) throw new Error("No financial tables found in pages " + from + "-" + to + ". Try a wider range.");
         renderMain(result.meta, result.statements, url);
       } catch (err) {
