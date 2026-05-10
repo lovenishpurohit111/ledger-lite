@@ -127,7 +127,10 @@ function assignToColumns(rowItems, cols, labelCutX, noteColRange) {
     if (noteColRange && cx >= noteColRange.min && cx <= noteColRange.max) continue;
     if (NOTE_REF.test(item.text)) continue;
 
-    const num = parseFloat(item.text.replace(/,/g,""));
+    const rawNum = item.text.replace(/,/g,"");
+    let num;
+    if (/^\([\d.]+\)$/.test(rawNum)) num = -parseFloat(rawNum.replace(/[()]/g,""));
+    else num = parseFloat(rawNum);
     if (isNaN(num)) continue;
 
     let best = -1, bd = tol;
@@ -187,7 +190,20 @@ function extractTablesFromItems(allItems) {
     });
   }
 
-  return tableRows.length >= 3 ? { columns: columns.map(c => c.header), rows: tableRows } : null;
+  // Merge orphan continuation rows (e.g. "income" on its own line after a data row)
+  const merged = [];
+  for (const row of tableRows) {
+    const prev = merged[merged.length - 1];
+    const isOrphan = row.row_type !== "header" && !row.values.some(v => v !== null)
+      && row.label.length < 30 && /^[a-z]/.test(row.label);
+    if (isOrphan && prev && prev.row_type !== "header") {
+      prev.label = prev.label + " " + row.label;
+    } else {
+      merged.push(row);
+    }
+  }
+
+  return merged.length >= 3 ? { columns: columns.map(c => c.header), rows: merged } : null;
 }
 
 function detectStmtName(items) {
