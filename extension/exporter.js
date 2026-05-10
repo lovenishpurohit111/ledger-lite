@@ -24,26 +24,35 @@ function cleanNum(val) {
 }
 
 function buildSheet(stmtData) {
-  const { headers, rows, unit, name } = stmtData;
+  const { unit, name } = stmtData;
+
+  // Normalise: PDF uses {columns, rows:{label,values}} — web uses {headers, rows:[arrays]}
+  const isPDF = stmtData.columns && !stmtData.headers;
+  const headers = isPDF
+    ? ["", ...(stmtData.columns || [])]
+    : (stmtData.headers || [""]);
+  const rawRows = isPDF
+    ? (stmtData.rows || []).map(r => [r.label, ...(r.values || []).map(v => v ?? "")])
+    : (stmtData.rows || []);
 
   const sheetRows = [];
 
   // Row 0: unit annotation
-  if (unit) sheetRows.push([unit, ...Array(headers.length - 1).fill("")]);
+  if (unit) sheetRows.push([unit, ...Array(Math.max(0, headers.length - 1)).fill("")]);
 
-  // Row 1: headers (label col + year cols)
+  // Row 1: headers
   sheetRows.push(headers);
 
   // Data rows
-  for (const row of rows) {
-    if (!row.length) continue;
+  for (const row of rawRows) {
+    if (!row || !row.length) continue;
     const label = row[0];
     const values = row.slice(1).map(cleanNum);
     sheetRows.push([label, ...values]);
   }
 
   // ── Add YoY growth rows for key numeric metrics ───────────────────────────
-  const dataStartIdx = unit ? 2 : 1;           // skip unit + header rows
+  const dataStartIdx = unit ? 2 : 1;
   const yearCount = headers.length - 1;
   const growthRows = [];
 
@@ -88,8 +97,8 @@ function exportToExcel(meta, statements) {
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
     // Column widths
-    const colCount = (stmt.headers || []).length;
-    ws["!cols"] = [{ wch: 32 }, ...Array(colCount - 1).fill({ wch: 11 })];
+    const colCount = (stmt.headers || stmt.columns || []).length;
+    ws["!cols"] = [{ wch: 32 }, ...Array(Math.max(0, colCount)).fill({ wch: 11 })];
 
     const sheetName = stmt.name.substring(0, 31);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
