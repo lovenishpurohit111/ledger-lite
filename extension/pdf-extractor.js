@@ -5,9 +5,10 @@ function cleanHeader(h) { return (h||'').replace(/^[`'"\s´]+|[`'"\s´]+$/g,'').
 const PERIOD_RE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,.\s]*['`]?\s*\d{2,4}\b|\bFY\s*\d{2,4}\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,.\s]*\d{4}\b|\b20\d{2}\b|\b(TTM|LTM)\b|\b\d+\s*mths?\b/i;
 
 const STMT_PATTERNS = [
-  { re: /(?:statement\s+of\s+)?profit\s+(?:and|&)\s+loss|income\s+statement/i, name: "Profit & Loss"  },
-  { re: /balance\s+sheet|statement\s+of\s+financial\s+position/i,              name: "Balance Sheet"  },
-  { re: /cash\s+flow/i,                                                         name: "Cash Flow"      },
+  { re: /(?:statement\s+of\s+)?profit\s+(?:and|&)\s+loss|income\s+statement/i, name: "Profit & Loss"      },
+  { re: /balance\s+sheet|statement\s+of\s+financial\s+position/i,              name: "Balance Sheet"      },
+  { re: /cash\s+flow/i,                                                           name: "Cash Flow"          },
+  { re: /(?:statement\s+of\s+)?changes\s+in\s+equity|statement.*equity/i,      name: "Changes in Equity"  },
 ];
 
 const TOTAL_KW = ["total","net profit","gross profit","operating profit",
@@ -41,14 +42,23 @@ async function getPDFPageCount(url) {
 
 async function getPageItems(pdf, pageNum) {
   const page = await pdf.getPage(pageNum);
+  const vp = page.getViewport({ scale: 1 });
+  const isLandscape = vp.width > vp.height * 1.2;
   const content = await page.getTextContent();
   return content.items
     .filter(i => i.str.trim())
-    .map(i => ({ text: i.str.trim(), x: Math.round(i.transform[4]), y: Math.round(i.transform[5]), w: Math.round(Math.abs(i.width)) }));
+    .map(i => ({
+      text: i.str.trim(),
+      x: Math.round(i.transform[4]),
+      y: Math.round(i.transform[5]),
+      w: Math.round(Math.abs(i.width)),
+      isLandscape
+    }));
 }
 
 // Cluster items into visual rows by y-position
-function clusterRows(items, yTol = 5) {
+function clusterRows(items, yTol) {
+  if (yTol === undefined) yTol = items.some(i => i.isLandscape) ? 4 : 5;
   const rows = [];
   for (const item of [...items].sort((a,b) => b.y - a.y)) {
     const row = rows.find(r => Math.abs(r.y - item.y) < yTol);
@@ -117,7 +127,8 @@ function detectColumns(rows) {
 // Assign numbers in a row to nearest column
 function assignToColumns(rowItems, cols, labelCutX, noteColRange) {
   const span = cols[cols.length-1].cx - cols[0].cx;
-  const tol = Math.max(50, (span / Math.max(cols.length-1,1)) * 0.75);
+  const colGap = span / Math.max(cols.length-1,1);
+  const tol = Math.max(30, colGap * (cols.length > 8 ? 0.55 : 0.75));
   const result = cols.map(() => null);
   const used = new Set();
 
@@ -205,7 +216,7 @@ function extractTablesFromItems(allItems) {
     }
   }
 
-  return merged.length >= 3 ? { columns: columns.map(c => cleanHeader(c.header)), rows: merged } : null;
+  return merged.length >= 2 ? { columns: columns.map(c => cleanHeader(c.header)), rows: merged } : null;
 }
 
 function detectStmtName(items) {

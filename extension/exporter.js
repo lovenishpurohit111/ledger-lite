@@ -103,7 +103,8 @@ function exportToExcel(meta, statements, addGrowth = true) {
 
     // Column widths
     const colCount = (stmt.headers || stmt.columns || []).length;
-    ws["!cols"] = [{ wch: 32 }, ...Array(Math.max(0, colCount)).fill({ wch: 11 })];
+    const isEquity = /equity/i.test(stmt.name || "");
+    ws["!cols"] = [{ wch: isEquity ? 38 : 32 }, ...Array(Math.max(0, colCount)).fill({ wch: isEquity ? 14 : 11 })];
 
     const sheetName = stmt.name.substring(0, 31);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
