@@ -345,8 +345,12 @@ Rules:
     ...base64Images.map(b64 => ({ inlineData: { mimeType: "image/jpeg", data: b64 } }))
   ];
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+  // Try models in order of free-tier availability (2.0-flash retired March 2026)
+  const MODELS = ["gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+  let res, lastErr;
+  for (const model of MODELS) {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -357,9 +361,16 @@ Rules:
     }
   );
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini error ${res.status}: ${err.slice(0, 200)}`);
+      const body = await res.clone().text();
+      if (res.ok || !body.includes("not found")) break;
+      lastErr = `${model} not available`;
+    } catch(e) { lastErr = e.message; }
+  }
+  if (!res || !res.ok) {
+    const errText = res ? await res.text() : lastErr;
+    const status = res?.status || 0;
+    if (status === 429) throw new Error(`429: Gemini rate limit hit. Wait 60s and retry.`);
+    throw new Error(`Gemini error ${status}: ${String(errText).slice(0, 200)}`);
   }
 
   const data = await res.json();
