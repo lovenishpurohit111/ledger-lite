@@ -233,30 +233,27 @@ function detectUnit(items) {
   return m ? m[0].trim() : null;
 }
 
-async function extractPDF(url, fromPage = 1, toPage = null, geminiKey = "") {
+async function extractPDF(url, fromPage = 1, toPage = null, geminiKey = "", onProgress = null) {
   const lib = await loadPDFJS();
   const pdf = await lib.getDocument({ data: await fetchPDF(url) }).promise;
   const endPage = toPage ? Math.min(toPage, pdf.numPages) : Math.min(pdf.numPages, fromPage + 49);
 
-  // ── Gemini Vision path (better accuracy) ─────────────────────────────────
+  // ── Gemini Vision path ────────────────────────────────────────────────────
   if (geminiKey) {
-    try {
-      const base64Images = [];
-      for (let p = fromPage; p <= endPage; p++) {
-        base64Images.push(await renderPageToBase64(pdf, p));
-        // Gemini accepts max 16 images per request
-        if (base64Images.length === 16) break;
-      }
-      const result = await extractWithGemini(base64Images, geminiKey);
-      if (result.ok) {
-        const firstItems = await getPageItems(pdf, fromPage);
-        const firstLines = clusterRows(firstItems).map(r => r.items.map(i=>i.text).join(" "));
-        const co = firstLines.find(l => /Ltd|Limited|Industries|Bank|Corp|Inc/i.test(l) && l.length < 80);
-        return { ok: true, meta: { name: co || "Company", ticker: "" }, statements: result.statements };
-      }
-    } catch (err) {
-      console.warn("Gemini extraction failed, falling back to text:", err.message);
+    const base64Images = [];
+    for (let p = fromPage; p <= endPage; p++) {
+      if (typeof onProgress === "function") onProgress(`Rendering page ${p}…`);
+      base64Images.push(await renderPageToBase64(pdf, p));
+      if (base64Images.length === 16) break;
     }
+    if (typeof onProgress === "function") onProgress("Sending to Gemini API…");
+    // Let Gemini errors propagate — user needs to see quota/key errors
+    const result = await extractWithGemini(base64Images, geminiKey);
+    if (!result.ok) throw new Error("Gemini returned no financial tables. Try including more pages.");
+    const firstItems = await getPageItems(pdf, fromPage);
+    const firstLines = clusterRows(firstItems).map(r => r.items.map(i=>i.text).join(" "));
+    const co = firstLines.find(l => /Ltd|Limited|Industries|Bank|Corp|Inc/i.test(l) && l.length < 80);
+    return { ok: true, meta: { name: co || "Company", ticker: "" }, statements: result.statements };
   }
 
   const statements = {};

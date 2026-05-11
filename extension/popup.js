@@ -208,13 +208,19 @@ async function init() {
       status.textContent = "Reading " + (to-from+1) + " page(s)...";
       try {
         const geminiKey = document.getElementById("gemini-key")?.value?.trim() || "";
-        if (geminiKey) await chrome.storage.local.set({ geminiKey });
-        const result = await window.extractPDF(url, from, to, geminiKey);
+        if (geminiKey) { await chrome.storage.local.set({ geminiKey }); status.textContent = "Rendering pages for Gemini..."; }
+        const result = await window.extractPDF(url, from, to, geminiKey, (msg) => {
+          status.textContent = msg;
+        });
         if (!result.ok) throw new Error("No financial tables found in pages " + from + "-" + to + ". Try a wider range.");
         renderMain(result.meta, result.statements, url);
       } catch (err) {
         status.className = "status error";
-        status.textContent = err.message;
+        let m = err.message || "Unknown error";
+        if (m.includes("429")) m = "Gemini quota exceeded. Wait or use a different key.";
+        else if (m.includes("400")) m = "Invalid Gemini API key. Check and retry.";
+        else if (m.includes("403")) m = "Key lacks permission. Enable Gemini API in Google Cloud.";
+        status.textContent = "❌ " + m;
         btn.disabled = false; btn.textContent = "Try again";
       }
     });
