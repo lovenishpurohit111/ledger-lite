@@ -24,9 +24,12 @@ function isTotal(label) {
 }
 
 async function loadPDFJS() {
-  const lib = await import(chrome.runtime.getURL("pdf.min.mjs"));
-  lib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.mjs");
-  return lib;
+  // Wait for module shim in popup.html to expose window._pdfjsLib
+  for (let i = 0; i < 40; i++) {
+    if (window._pdfjsLib) return window._pdfjsLib;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  throw new Error("PDF.js failed to load. Please reload the extension.");
 }
 
 async function fetchPDF(url) {

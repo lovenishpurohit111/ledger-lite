@@ -149,8 +149,15 @@
     </div>
   </div>
 
+  <!-- Expose PDF.js as global (mjs → window._pdfjsLib) -->
+  <script type="module">
+    import * as pdfjs from "./pdf.min.mjs";
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.mjs", import.meta.url).href;
+    window._pdfjsLib = pdfjs;
+  </script>
   <script src="xlsx.min.js"></script>
   <script src="exporter.js"></script>
+  <script src="pdf-extractor.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

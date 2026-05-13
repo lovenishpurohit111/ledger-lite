@@ -185,7 +185,6 @@ async function init() {
       <div class="status" id="status"></div>
     `);
     try {
-      await import(chrome.runtime.getURL("pdf-extractor.js"));
       const total = await window.getPDFPageCount(url);
       document.getElementById("page-status").style.display = "none";
       document.getElementById("range-ui").style.display = "block";
