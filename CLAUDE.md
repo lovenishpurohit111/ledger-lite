@@ -1,105 +1,168 @@
-# CLAUDE.md — Financial-Convertor
+# CLAUDE.md — FinXport (Financial-Convertor)
 
 ## Project Overview
-**Financials Conversion** converts scanned financial statements (JPG, PNG, WEBP, PDF) into clean, reviewed Excel workbooks. It uses a hybrid pipeline: local OCR → Gemini AI reasoning → user review → Excel export.
+**FinXport** converts financial statements (P&L, Balance Sheet, Cash Flow, Changes in Equity) from screenshots, PDFs, and financial websites into clean Excel workbooks. It ships as two products:
 
-Live app: https://ledger-lite-two.vercel.app
+1. **Web App** — `ledger-lite-two.vercel.app` (React PWA, installable on Android)
+2. **Browser Extension** — Published on Firefox Add-ons (v1.1.0 approved ✅), Chrome load-unpacked
 
 ---
 
 ## Tech Stack
+
+### Web App
 | Layer | Technology |
 |---|---|
 | Frontend | React + Vite + Tailwind CSS |
-| Backend | Python FastAPI |
-| OCR | Tesseract / pytesseract |
-| Image Processing | OpenCV |
-| AI Reasoning | Gemini API (`google-genai`) |
-| Excel Export | openpyxl |
+| OCR | Tesseract.js v7 (runs in browser, TSV output for word positions) |
+| Excel Export | SheetJS (xlsx) — fully client-side |
 | Deployment | Vercel |
+| PWA | manifest.json + service worker (installable on Android) |
+
+### Browser Extension (`/extension`)
+| Layer | Technology |
+|---|---|
+| DOM Extraction | Vanilla JS content script — reads HTML tables directly |
+| PDF Extraction | PDF.js (loaded via module shim in popup.html) |
+| AI Vision | Gemini API (optional — user provides key, stored in chrome.storage) |
+| Excel Export | SheetJS bundled in extension |
+| Testing | `test.cjs` — 39+ assertions, runs before every push |
 
 ---
 
 ## Project Structure
 ```
 /
-├── src/          # React frontend source
-├── backend/      # Python FastAPI backend
-├── api/          # API route handlers (Vercel serverless)
-├── samples/      # Sample inputs/outputs for testing
-│   ├── input/    # Text sidecars simulating OCR-readable statements
-│   └── output/   # Generated example workbooks
-├── index.html
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── requirements.txt
-├── requirements-dev.txt
-└── vercel.json
+├── src/                    # React frontend
+│   ├── main.jsx            # Main app component
+│   └── processor.js        # Tesseract OCR + financial table parsing
+├── extension/              # Browser extension
+│   ├── manifest.json       # MV3 manifest (Firefox + Chrome)
+│   ├── content.js          # Universal DOM table extractor
+│   ├── popup.html/js       # Extension popup UI
+│   ├── exporter.js         # Excel builder (handles web + PDF formats)
+│   ├── pdf-extractor.js    # PDF.js + Gemini Vision extraction
+│   ├── pdf.min.mjs         # PDF.js library
+│   ├── pdf.worker.min.mjs  # PDF.js worker
+│   ├── xlsx.min.js         # SheetJS
+│   └── test.cjs            # Self-test suite (run before every push)
+├── public/                 # PWA assets
+│   ├── manifest.json       # Web app manifest
+│   ├── sw.js               # Service worker
+│   └── icons/              # PWA icons
+├── api/                    # Vercel serverless functions
+│   ├── health.js
+│   └── diagnostics.js
+├── .github/workflows/      # GitHub Actions
+│   └── publish-extension.yml  # Auto-publish to Firefox Add-ons
+└── index.html              # PWA entry point
 ```
 
 ---
 
-## Setup & Running Locally
+## Web App — How It Works
 
-### 1. Install dependencies
-```bash
-npm install
-python -m pip install -r requirements.txt
+1. **Upload** — Drop JPG/PNG/PDF screenshot
+2. **Preprocess** — 2.5× upscale, shadow removal, contrast stretch, unsharp mask
+3. **OCR** — Tesseract.js v7 with TSV output (word bounding boxes)
+4. **Table Reconstruction** — Clusters words by Y-position, detects year columns (Mar 2024, FY24, TTM), assigns values to columns
+5. **Review** — Multi-column editable spreadsheet view (Line Item | Mar 2014 | ... | TTM)
+6. **Export** — SheetJS generates .xlsx in browser
+
+### Key OCR Notes
+- Use `data.tsv` NOT `data.words` (doesn't exist in Tesseract.js v7)
+- TSV columns: `level | page | block | par | line | word | left | top | width | height | conf | text`
+- Level 5 = word level
+- Parenthetical negatives `(1510.46)` → `-1510.46`
+- Percentage values `31%` kept as string `"31%"`
+
+---
+
+## Extension — How It Works
+
+### Supported Sites
+- **Screener.in** — reads `#profit-loss`, `#balance-sheet`, `#cash-flow`, `#quarters` section IDs
+- **Tickertape** — tries `__NEXT_DATA__` JSON first, falls back to DOM table scan
+- **Moneycontrol** — universal table scanner (headers: "12 mths", "MAR 26" etc.)
+- **Any financial site** — universal PERIOD_RE scans for date/year patterns in table headers
+
+### PERIOD_RE Pattern
+```javascript
+/\b(Jan|Feb|Mar|...)['`]?\s*\d{2,4}\b|\bFY\s*\d{2,4}\b|\b(TTM|LTM)\b|\b\d+\s*mths?\b/i
 ```
 
-### 2. Set environment variable
-```bash
-# Windows PowerShell
-$env:GEMINI_API_KEY="your-key"
+### PDF Extraction
+- PDF.js loaded via `<script type="module">` shim in popup.html → `window._pdfjsLib`
+- Position-aware extraction: clusters text items by Y-position, detects column X-centers
+- Detects Note column (3A, 22A etc.) and excludes from values
+- Merges multi-line headers ("As at\n31st March, 2025")
+- Handles landscape pages (Changes in Equity)
+- **Gemini Vision fallback**: renders pages at 2.5× → sends to Gemini API
+  - Model chain: `gemini-2.5-flash-lite` → `gemini-1.5-flash` → `gemini-1.5-flash-8b`
+  - Key stored in `chrome.storage.local`
 
-# macOS/Linux
-export GEMINI_API_KEY="your-key"
-```
+### YoY Growth Rows
+- Only added for **Profit & Loss** sheets
+- Only for: Sales, Revenue, Net Profit, Operating Profit, EBITDA, PBT, PAT
+- Never for Balance Sheet or Cash Flow
 
-### 3. Run dev servers
-```bash
-npm run dev
-```
-- Frontend: http://localhost:5173
-- Backend health: http://localhost:3001/api/health
+---
 
-### 4. Run tests
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest backend/tests
-```
+## Extension — Self-Testing Policy
+**Run `node extension/test.cjs` before every push. Never push if tests fail.**
 
-### 5. Generate sample workbook
+The test suite covers:
+- Screener.in DOM extraction (headers, data rows, Tax%, EPS, OPM%)
+- Tickertape DOM table detection
+- Tickertape `__NEXT_DATA__` JSON parsing
+- Moneycontrol "12 mths" header format
+- Moneycontrol "MAR 26" header format
+- cleanNum() helper (commas, percentages, decimals)
+- PERIOD_RE pattern matching
+
+---
+
+## Firefox Extension Status
+- **v1.1.0 approved** ✅ on addons.mozilla.org
+- Extension ID: `finxport@lovenishpurohit`
+- Strict min version: Firefox 140, Firefox for Android 142
+- `data_collection_permissions.required: ["none"]`
+
+## GitHub Actions
+`.github/workflows/publish-extension.yml` — triggers on push to `extension/**`:
+1. Bumps patch version in manifest.json
+2. Builds ZIP (excludes test.cjs)
+3. Creates GitHub Release with ZIP attached
+4. Publishes to Firefox Add-ons (requires `FIREFOX_API_KEY` + `FIREFOX_API_SECRET` secrets)
+
+---
+
+## Environment & Deployment
+
+### Vercel
+- Frontend auto-deploys from GitHub `main` branch
+- Empty commit to trigger: `git commit --allow-empty -m "trigger redeploy"`
+- No environment variables required (all processing is client-side)
+
+### Git Workflow
 ```bash
-python samples/generate_example.py
-# Output: samples/output/financials-conversion-example.xlsx
+# Clone with PAT
+git clone https://{PAT}@github.com/lovenishpurohit111/Financial-Convertor.git
+
+# Before pushing extension changes
+node extension/test.cjs   # must show 0 failures
+
+# Repackage extension ZIP
+cd extension && zip -r ../FinXport-extension.zip . --exclude "test.cjs"
 ```
 
 ---
 
-## Pipeline Flow
-1. **Upload** — JPG, PNG, WEBP, scanned/multi-page PDF, or paste screenshot (Ctrl+V / Cmd+V)
-2. **Preprocess** — deskew, denoise, sharpen, contrast, orientation/perspective fix (OpenCV)
-3. **OCR** — local text + layout extraction (Tesseract)
-4. **AI Reasoning** — send compact OCR tokens + bounding boxes to Gemini for classification, table reconstruction, normalization
-5. **Validation** — check totals, duplicates, missing values, row confidence
-6. **Review** — user reviews/corrects rows in UI (mandatory for quality)
-7. **Export** — Excel workbook with P&L, Balance Sheet, and Cash Flow sheets
-
----
-
-## Key Notes for Development
-- **No Claude/Anthropic API** is used — AI layer is Gemini only
-- OCR and OpenCV dependencies are **optional at dev time** (app starts without them)
-- Production requires native **Tesseract binary** and **Poppler** installed
-- Uploads should be stored in **object storage** (not the repo) in production
-- The **review screen is mandatory** — low-confidence cells and warnings must be surfaced before export
-- Add **auth + DB-backed job tracking** before any SaaS launch
-
----
-
-## Environment Variables
-| Variable | Required | Description |
-|---|---|---|
-| `GEMINI_API_KEY` | Yes (prod) | Google Gemini API key |
+## Known Quirks & Hard-Won Lessons
+- **Tesseract.js v7**: no `data.words` — use `data.tsv` with level=5 filter
+- **PDF.js in Firefox popup**: dynamic `import()` fails — use `<script type="module">` shim in popup.html
+- **Gemini 2.0 Flash retired** March 2026 — use `gemini-1.5-flash` or `gemini-2.5-flash-lite`
+- **Firefox manifest**: needs `data_collection_permissions`, `strict_min_version: "140.0"`, `gecko_android.strict_min_version: "142.0"`
+- **ZIP packaging**: must zip FROM INSIDE `extension/` directory so `manifest.json` is at root
+- **Extension statement keys**: popup, content.js, and exporter.js all use dynamic keys — never hardcode `["profit-loss","balance-sheet"]` only
+- **YoY rows**: never add to Balance Sheet/Cash Flow — only P&L and only for key metrics
