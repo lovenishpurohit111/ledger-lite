@@ -1,0 +1,75 @@
+name: Telegram Financial Convert
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        required: true
+        type: string
+      file_id:
+        required: true
+        type: string
+      file_name:
+        required: true
+        type: string
+      reply_to_message_id:
+        required: true
+        type: string
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Download upload from Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FILE_ID: ${{ inputs.file_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          FILE_PATH=$(curl -fsS "https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${FILE_ID}" | python -c "import sys,json; print(json.load(sys.stdin)['result']['file_path'])")
+          EXT="${FILE_PATH##*.}"
+          curl -fsSLo "work/input.${EXT}" "https://api.telegram.org/file/bot${BOT_TOKEN}/${FILE_PATH}"
+          echo "INPUT_FILE=work/input.${EXT}" >> "$GITHUB_ENV"
+
+      - name: Convert upload to Excel
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python scripts/run_telegram_conversion.py --input "$INPUT_FILE" --output work/financials-conversion.xlsx
+
+      - name: Send Excel to Telegram
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          REPLY_TO: ${{ inputs.reply_to_message_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F chat_id="${CHAT_ID}" \
+            -F reply_to_message_id="${REPLY_TO}" \
+            -F document=@work/financials-conversion.xlsx \
+            -F caption="Converted Excel file"
+
+      - name: Notify failure
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            --data-urlencode text="Conversion failed. Please try a clearer PDF."
