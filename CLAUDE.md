@@ -123,11 +123,11 @@ The test suite covers:
 ---
 
 ## Firefox Extension Status
-- **v1.3.0 submitted** 🔄 on addons.mozilla.org (v1.2.0 previously submitted, v1.1.0 approved ✅)
+- **v1.4.0 submitted** ✅ via GitHub Actions auto-publish (v1.3.0 previously submitted manually)
 - Extension ID: `finxport@lovenishpurohit`
 - Strict min version: Firefox 140, Firefox for Android 142
 - `data_collection_permissions.required: ["none"]`
-- ZIP packaged manually: `cd extension && zip -r ../FinXport-v1.3.0.zip . --exclude "test.cjs"`
+- ZIP now built and published automatically via GitHub Actions on every push to `extension/**`
 
 ## What Changed in v1.3.0
 **Bug Fixes**
@@ -159,19 +159,31 @@ The test suite covers:
 
 ## GitHub Actions
 
-### `publish-extension.yml` — Firefox Auto-Publish
-Triggers on push to `extension/**` on `main`. Does NOT auto-bump version (manage versions manually).
+### `publish-extension.yml` — Firefox Auto-Publish ✅
+Triggers on push to `extension/**` OR `.github/workflows/publish-extension.yml` on `main`.
+Does NOT auto-bump version — manage versions manually in `manifest.json` before pushing.
 
 Steps:
 1. Reads version from `manifest.json`
-2. Runs `node extension/test.cjs` — fails fast if any test breaks
-3. Builds ZIP from inside `extension/` (so `manifest.json` is at root)
-4. Creates a GitHub Release with ZIP attached
-5. Submits to Firefox Add-ons via `web-ext sign`
+2. Installs `jsdom` (needed by test suite) + `web-ext` globally
+3. Runs `node extension/test.cjs` — fails fast if any test breaks
+4. Builds ZIP from inside `extension/` (so `manifest.json` is at root)
+5. Creates a GitHub Release with ZIP attached
+6. Submits to Firefox Add-ons via `web-ext sign --channel listed`
+
+**Required permissions:** `contents: write` (set at workflow level — allows creating Releases)
+**Node version:** 22
 
 **Required secrets** (Settings → Secrets and variables → Actions):
 - `FIREFOX_API_KEY` — JWT issuer from addons.mozilla.org → Manage API Keys
 - `FIREFOX_API_SECRET` — JWT secret from addons.mozilla.org → Manage API Keys
+
+**Release flow:**
+```bash
+# 1. Make your changes to extension/
+# 2. Bump version in extension/manifest.json
+# 3. Push → workflow runs automatically → GitHub Release + Firefox submission
+```
 
 ### `telegram-pdf-convert.yml` — Telegram Bot
 Triggered via `workflow_dispatch` by the Telegram bot when a user sends a file.
