@@ -435,18 +435,20 @@ function ReviewTable({ statement, updateRow, deleteRow, updateColValue }) {
   const td = statement.tableData;
 
   if (td && td.columns && td.columns.length > 1) {
-    // ── Multi-year spreadsheet view ──────────────────────────────────────────
+    // Multi-year spreadsheet view
+    const hasNote = td.rows.some(r => r.note);
     return (
       <div className="overflow-x-auto">
         {statement.unit && (
           <div className="flex justify-end px-4 py-1.5 text-xs text-zinc-400 font-medium border-b border-zinc-100 bg-zinc-50/50">
-            <span className="flex items-center gap-1">📊 {statement.unit.replace(/^figures?\s+in\s+/i, "").replace(/^in\s+/i, "").replace(/\w/g, c => c.toUpperCase())}</span>
+            <span className="flex items-center gap-1">📊 {statement.unit.replace(/^figures?\s+in\s+/i, "").replace(/^in\s+/i, "").replace(/\b\w/g, c => c.toUpperCase())}</span>
           </div>
         )}
         <table className="w-full text-left text-sm border-collapse">
           <thead className="bg-zinc-50 text-xs font-bold uppercase text-zinc-500 sticky top-0 z-10">
             <tr>
               <th className="px-4 py-3 border-b border-zinc-200 min-w-[200px] bg-zinc-50">Line Item</th>
+              {hasNote && <th className="px-3 py-3 border-b border-zinc-200 text-center whitespace-nowrap bg-zinc-50 min-w-[60px]">Note</th>}
               {td.columns.map((col) => (
                 <th key={col} className="px-3 py-3 border-b border-zinc-200 text-right whitespace-nowrap bg-zinc-50 min-w-[90px]">{col}</th>
               ))}
@@ -455,22 +457,33 @@ function ReviewTable({ statement, updateRow, deleteRow, updateColValue }) {
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {statement.rows.map((row) => {
+              const isHeader = row.row_type === "header";
               const isTotal = row.row_type === "total" || row.row_type === "subtotal";
+              const isBold = row.is_bold || isHeader || isTotal;
               return (
-                <tr key={row.id} className={isTotal ? "bg-amber-50/60" : "bg-white hover:bg-zinc-50/60"}>
+                <tr key={row.id} className={isHeader ? "bg-zinc-100" : isTotal ? "bg-amber-50/60" : "bg-white hover:bg-zinc-50/60"}>
                   <td className="px-4 py-1.5 border-r border-zinc-100">
                     <input
                       value={row.label || ""}
                       onChange={(e) => updateRow(row.id, "label", e.target.value)}
-                      className={`table-input ${isTotal ? "font-bold" : "font-medium"}`}
+                      className={`table-input ${isBold ? "font-bold" : "font-medium"}`}
                     />
                   </td>
+                  {hasNote && (
+                    <td className="px-2 py-1.5 text-center border-r border-zinc-100">
+                      <input
+                        value={row.note || ""}
+                        onChange={(e) => updateRow(row.id, "note", e.target.value)}
+                        className="table-input text-center font-mono text-xs w-full text-zinc-500"
+                      />
+                    </td>
+                  )}
                   {(row.values || td.columns.map(() => null)).map((val, ci) => (
                     <td key={ci} className="px-2 py-1.5 text-right">
                       <input
                         value={val !== null && val !== undefined ? val : ""}
                         onChange={(e) => updateColValue(row.id, ci, e.target.value)}
-                        className={`table-input text-right font-mono text-xs w-full ${isTotal ? "font-bold" : ""}`}
+                        className={`table-input text-right font-mono text-xs w-full ${isBold ? "font-bold" : ""}`}
                       />
                     </td>
                   ))}
@@ -488,7 +501,7 @@ function ReviewTable({ statement, updateRow, deleteRow, updateColValue }) {
     );
   }
 
-  // ── Single-column fallback view ────────────────────────────────────────────
+    // ── Single-column fallback view ────────────────────────────────────────────
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[920px] text-left text-sm">

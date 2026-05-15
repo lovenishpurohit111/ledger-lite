@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const MONTH_RE = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i;
+const MONTH_RE = /^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)$/i;
 const YEAR_RE  = /^\d{4}$/;
 
 const TOTAL_KW = ["total","net profit","gross profit","operating profit",
@@ -179,42 +179,51 @@ function detectCols(rows) {
     if(!ws.some(w=>MONTH_RE.test(w.text))) continue;
 
     const cols=[];
-    let lastColEndIdx=-1;
+    // Detect Note column X position from header row
+    let noteX=null;
+    for(let i=0;i<ws.length;i++) {
+      if(/^note$/i.test(ws[i].text)) {
+        noteX=(ws[i].bbox.x0+ws[i].bbox.x1)/2;
+      } else if(/^no\.?$/i.test(ws[i].text)&&i>0&&/^note$/i.test(ws[i-1].text)) {
+        noteX=(ws[i-1].bbox.x0+ws[i].bbox.x1)/2;
+      }
+    }
 
     for(let i=0;i<ws.length;i++) {
-      if(MONTH_RE.test(ws[i].text)&&ws[i+1]&&YEAR_RE.test(ws[i+1].text)) {
-        cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2});
-        lastColEndIdx=i+1; i++;
-      } else if(/^T+M[.,:]?$/i.test(ws[i].text.trim())) {
-        // catches TTM, TIM, TTW etc. (OCR misreads)
+      if(MONTH_RE.test(ws[i].text)) {
+        // "Month YYYY" — 2-token (e.g. "Mar 2024")
+        if(ws[i+1]&&YEAR_RE.test(ws[i+1].text)) {
+          cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2});
+          i++;
+        }
+        // "Month DD[,] YYYY" — 3-token (e.g. "March 31, 2025")
+        else if(ws[i+1]&&ws[i+2]&&YEAR_RE.test(ws[i+2].text)) {
+          cols.push({header:`${ws[i].text} ${ws[i+2].text}`,cx:(ws[i].bbox.x0+ws[i+2].bbox.x1)/2});
+          i+=2;
+        }
+      } else if(/^T+M[.,:]?$|^(TTM|LTM)$/i.test(ws[i].text.trim())) {
+        // catches TTM, TIM, TTW etc. (OCR misreads), also LTM
         cols.push({header:"TTM",cx:(ws[i].bbox.x0+ws[i].bbox.x1)/2});
-        lastColEndIdx=i;
       }
     }
 
     if(cols.length<2) continue;
 
-    // If no TTM detected, check for any leftover word(s) after the last year
+    // Only add TTM if there's explicit evidence (don't extrapolate for Balance Sheets etc.)
     if(!cols.find(c=>c.header==="TTM")) {
       const spacing=(cols[cols.length-1].cx-cols[0].cx)/Math.max(cols.length-1,1);
       const extraWords=ws.filter(w=>{
         const cx=(w.bbox.x0+w.bbox.x1)/2;
         return cx>cols[cols.length-1].cx+spacing*0.4 && w.text.trim().length>0;
       });
-      if(extraWords.length>0) {
-        // Use the word closest to expected TTM position
-        const expectedCx=cols[cols.length-1].cx+spacing;
-        const best=extraWords.sort((a,b)=>
-          Math.abs((a.bbox.x0+a.bbox.x1)/2-expectedCx)-Math.abs((b.bbox.x0+b.bbox.x1)/2-expectedCx)
-        )[0];
-        cols.push({header:"TTM",cx:(best.bbox.x0+best.bbox.x1)/2});
-      } else {
-        // Extrapolate TTM column position even if header not visible
-        cols.push({header:"TTM",cx:cols[cols.length-1].cx+spacing});
+      // Only add TTM if the extra word explicitly looks like a TTM header
+      const ttmWord=extraWords.find(w=>/^(TTM|LTM|T\.T\.M\.?|9M|6M|3M)$/i.test(w.text.trim()));
+      if(ttmWord) {
+        cols.push({header:"TTM",cx:(ttmWord.bbox.x0+ttmWord.bbox.x1)/2});
       }
     }
 
-    return {hri:ri,cols};
+    return {hri:ri,cols,noteX};
   }
   return null;
 }
@@ -262,7 +271,7 @@ function buildTable(words, text) {
   const rows=toRows(words);
   const ci=detectCols(rows);
   if(!ci||ci.cols.length<2) return null;
-  const {hri,cols}=ci;
+  const {hri,cols,noteX}=ci;
   const cutX=cols[0].cx-(cols[1]?(cols[1].cx-cols[0].cx)*0.5:60);
   let section="General";
   const trows=[];
@@ -275,17 +284,36 @@ function buildTable(words, text) {
     const label=rw.filter(w=>(w.bbox.x0+w.bbox.x1)/2<cutX)
       .map(w=>w.text).join(" ").replace(/[+*©®™|<>:]+$/,"").replace(/\s+/g," ").trim();
 
-    if(!label||label.length<2||/^\d+$/.test(label)||SKIP_RE.test(label)) continue;
+    if(!label||label.length<2||/^[\d\s,.()\-]+$/.test(label)||SKIP_RE.test(label)) continue;
 
     const mergedRw = mergeNumberFragments(rw);
     const vals=assign(mergedRw,cols,cutX);
-    if(!vals.some(v=>v!==null)) continue;
+
+    // Extract note number: short digit token near noteX (between label zone and first value col)
+    let note=null;
+    if(noteX) {
+      const noteTol=40;
+      const noteCandidate=rw.find(w=>{
+        const cx=(w.bbox.x0+w.bbox.x1)/2;
+        return Math.abs(cx-noteX)<noteTol && /^\d{1,2}[A-Z]?$/.test(w.text.trim());
+      });
+      if(noteCandidate) note=noteCandidate.text.trim();
+    }
+
+    // Detect ALL CAPS section headers (e.g. "NON-CURRENT ASSETS", "EQUITY AND LIABILITIES")
+    const isAllCaps=label.length>3&&label===label.toUpperCase()&&/[A-Z]/.test(label);
+
+    // Keep row if it has values OR it's a section header
+    if(!vals.some(v=>v!==null)&&!isAllCaps) continue;
 
     const sec=getSection(label);
     if(sec) section=sec;
 
-    trows.push({id:crypto.randomUUID(),label,section,
-      row_type:classify(label),values:vals,
+    const rowType=isAllCaps?"header":classify(label);
+    const is_bold=isAllCaps||rowType==="total"||rowType==="subtotal";
+
+    trows.push({id:crypto.randomUUID(),label,section,note,is_bold,
+      row_type:rowType,values:vals,
       amount:[...vals].reverse().find(v=>v!==null)??0,
       level:1,confidence:0.9,issues:[]});
   }
@@ -336,12 +364,30 @@ export function exportToExcel(statements) {
   for(const stmt of statements) {
     const td=stmt.tableData;
     const yrs=td?td.columns:["Amount (₹ Cr)"];
-    const hdr=["Line Item",...yrs];
-    const body=(td?td.rows:stmt.rows).map(r=>[r.label,...(td?r.values.map(v=>v??[]):[r.amount])]);
-    const unitRow=stmt.unit?[[stmt.unit,...yrs.map(()=>"")]]:[]; 
+    const hasNote=td&&td.rows.some(r=>r.note);
+    const hdr=hasNote?["Line Item","Note",...yrs]:["Line Item",...yrs];
+    const body=(td?td.rows:stmt.rows).map(r=>{
+      const vals=td?r.values.map(v=>v??[]):[r.amount];
+      return hasNote?[r.label,r.note||"",...vals]:[r.label,...vals];
+    });
+    const unitRow=stmt.unit?[[stmt.unit,...Array(hdr.length-1).fill("")]]:[]; 
     const ws=XLSX.utils.aoa_to_sheet([...unitRow,hdr,...body]);
-    ws["!cols"]=[{wch:28},...yrs.map(()=>({wch:11}))];
+
+    // Bold formatting for header/total/section rows
+    const dataStartRow=unitRow.length+1; // 0-indexed: unitRow + header row
+    (td?td.rows:stmt.rows).forEach((r,ri)=>{
+      if(!r.is_bold) return;
+      const excelRow=dataStartRow+ri;
+      hdr.forEach((_,ci)=>{
+        const ref=XLSX.utils.encode_cell({r:excelRow,c:ci});
+        if(ws[ref]) ws[ref].s={font:{bold:true}};
+        else ws[ref]={t:"z",s:{font:{bold:true}}};
+      });
+    });
+
+    const noteCol=hasNote?[{wch:8}]:[];
+    ws["!cols"]=[{wch:30},...noteCol,...yrs.map(()=>({wch:13}))];
     XLSX.utils.book_append_sheet(wb,ws,stmt.statement_type.substring(0,31));
   }
-  XLSX.writeFile(wb,"financials-export.xlsx");
+  XLSX.writeFile(wb,"financials-export.xlsx",{cellStyles:true});
 }
