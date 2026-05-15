@@ -123,11 +123,20 @@ The test suite covers:
 ---
 
 ## Firefox Extension Status
-- **v1.2.0 submitted** 🔄 on addons.mozilla.org (v1.1.0 previously approved ✅)
+- **v1.3.0 submitted** 🔄 on addons.mozilla.org (v1.2.0 previously submitted, v1.1.0 approved ✅)
 - Extension ID: `finxport@lovenishpurohit`
 - Strict min version: Firefox 140, Firefox for Android 142
 - `data_collection_permissions.required: ["none"]`
-- ZIP packaged manually: `cd extension && zip -r ../FinXport-v1.2.0.zip . --exclude "test.cjs"`
+- ZIP packaged manually: `cd extension && zip -r ../FinXport-v1.3.0.zip . --exclude "test.cjs"`
+
+## What Changed in v1.3.0
+**Bug Fixes**
+- Strip trailing "+" from Screener.in row labels ("Sales +" → "Sales", "Borrowings +" → "Borrowings")
+- Unit label "Consolidated Figures in Rs. Crores" now correctly appears in Excel (was missing)
+  - Unit lookup now walks up section → div → parentElement instead of just one level
+  - Strips "/ View Standalone" suffix from the unit text before writing to Excel
+
+---
 
 ## What Changed in v1.2.0
 **New Features**
