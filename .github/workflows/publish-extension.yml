@@ -5,42 +5,45 @@ on:
     branches: [main]
     paths: ["extension/**", ".github/workflows/publish-extension.yml"]
 
+permissions:
+  contents: write  # needed to create GitHub Releases
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Read version from manifest.json (no auto-bump — manage versions manually)
       - name: Read version
         id: ver
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Version: $VERSION"
 
-      # Install Node + dependencies
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: |
           npm install jsdom --save-dev
           npm install -g web-ext
+          echo "✅ Dependencies installed"
 
-      # Run extension self-tests
       - name: Run tests
-        run: node extension/test.cjs
+        run: |
+          node extension/test.cjs
+          echo "✅ All tests passed"
 
-      # Build ZIP (from inside extension/ so manifest.json is at root)
       - name: Build ZIP
         run: |
           cd extension
           zip -r ../FinXport-v${{ steps.ver.outputs.version }}.zip . \
             --exclude "test.cjs" --exclude "*.map"
+          echo "✅ ZIP built: FinXport-v${{ steps.ver.outputs.version }}.zip"
 
-      # Create GitHub Release with ZIP attached
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -48,21 +51,21 @@ jobs:
           name: FinXport v${{ steps.ver.outputs.version }}
           body: |
             ### FinXport v${{ steps.ver.outputs.version }}
-
-            **Install on Firefox:** Upload ZIP at addons.mozilla.org → Manage Submissions
-            **Install on Chrome:** Unzip → `chrome://extensions` → Developer mode → Load unpacked
+            **Firefox:** Upload ZIP at addons.mozilla.org → Manage Submissions
+            **Chrome:** Unzip → `chrome://extensions` → Developer mode → Load unpacked
           files: FinXport-v${{ steps.ver.outputs.version }}.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Submit to Firefox Add-ons
       - name: Submit to Firefox Add-ons
         env:
           FIREFOX_API_KEY: ${{ secrets.FIREFOX_API_KEY }}
           FIREFOX_API_SECRET: ${{ secrets.FIREFOX_API_SECRET }}
         run: |
+          echo "🚀 Submitting to Firefox Add-ons..."
           web-ext sign \
             --source-dir ./extension \
             --api-key "$FIREFOX_API_KEY" \
             --api-secret "$FIREFOX_API_SECRET" \
             --channel listed \
             --timeout 300000
+          echo "✅ Submitted to Firefox Add-ons"
