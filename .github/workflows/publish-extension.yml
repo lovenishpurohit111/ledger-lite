@@ -1,4 +1,4 @@
-name: Publish Extension (Free)
+name: Publish Firefox Extension
 
 on:
   push:
@@ -11,62 +11,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Auto-bump version
-      - name: Bump version
+      # Read version from manifest.json (no auto-bump — manage versions manually)
+      - name: Read version
         id: ver
         run: |
-          cd extension
-          OLD=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
-          IFS='.' read -r major minor patch <<< "$OLD"
-          NEW="$major.$minor.$((patch + 1))"
-          python3 -c "
-import json
-m = json.load(open('manifest.json'))
-m['version'] = '$NEW'
-json.dump(m, open('manifest.json','w'), indent=2)
-"
-          echo "version=$NEW" >> $GITHUB_OUTPUT
+          VERSION=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Build ZIP
+      # Install Node + web-ext
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      # Run extension self-tests
+      - name: Run tests
+        run: |
+          cd /tmp && npm install jsdom 2>/dev/null
+          node $GITHUB_WORKSPACE/extension/test.cjs
+
+      # Build ZIP (from inside extension/ so manifest.json is at root)
       - name: Build ZIP
         run: |
           cd extension
-          zip -r ../finxport-${{ steps.ver.outputs.version }}.zip . \
+          zip -r ../FinXport-v${{ steps.ver.outputs.version }}.zip . \
             --exclude "test.cjs" --exclude "*.map"
 
-      # Create GitHub Release (free — always latest ZIP available)
+      # Create GitHub Release with ZIP attached
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: FinXport v${{ steps.ver.outputs.version }}
           body: |
-            ### What changed
-            Auto-built from latest commit.
+            ### FinXport v${{ steps.ver.outputs.version }}
 
-            ### Install
-            **Chrome:** Download ZIP → `chrome://extensions` → Developer mode → Load unpacked
-            **Firefox:** Download ZIP → `about:debugging` → Load Temporary Add-on
-          files: finxport-${{ steps.ver.outputs.version }}.zip
-          token: ${{ secrets.GITHUB_TOKEN }}   # Built-in — no setup needed!
+            **Install on Firefox:** Upload ZIP at addons.mozilla.org → Manage Submissions
+            **Install on Chrome:** Unzip → `chrome://extensions` → Developer mode → Load unpacked
+          files: FinXport-v${{ steps.ver.outputs.version }}.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Publish to Firefox Add-ons (FREE, no credit card)
-      - name: Publish to Firefox Add-ons
-        if: ${{ secrets.FIREFOX_API_KEY != '' }}
+      # Submit to Firefox Add-ons (requires FIREFOX_API_KEY + FIREFOX_API_SECRET secrets)
+      - name: Submit to Firefox Add-ons
+        env:
+          FIREFOX_API_KEY: ${{ secrets.FIREFOX_API_KEY }}
+          FIREFOX_API_SECRET: ${{ secrets.FIREFOX_API_SECRET }}
         run: |
-          pip install web-ext-submit 2>/dev/null || pip install jwt requests
-          npx web-ext sign \
-            --source-dir extension \
-            --api-key ${{ secrets.FIREFOX_API_KEY }} \
-            --api-secret ${{ secrets.FIREFOX_API_SECRET }} \
-            --channel listed
-        continue-on-error: true
-
-      # Commit bumped version back
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add extension/manifest.json
-          git diff --staged --quiet || git commit -m "chore: bump to v${{ steps.ver.outputs.version }} [skip ci]"
-          git push
+          web-ext sign \
+            --source-dir ./extension \
+            --api-key "$FIREFOX_API_KEY" \
+            --api-secret "$FIREFOX_API_SECRET" \
+            --channel listed \
+            --timeout 300000
