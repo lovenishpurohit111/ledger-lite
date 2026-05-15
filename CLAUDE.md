@@ -4,7 +4,7 @@
 **FinXport** converts financial statements (P&L, Balance Sheet, Cash Flow, Changes in Equity) from screenshots, PDFs, and financial websites into clean Excel workbooks. It ships as two products:
 
 1. **Web App** — `ledger-lite-two.vercel.app` (React PWA, installable on Android)
-2. **Browser Extension** — Published on Firefox Add-ons (v1.1.0 approved ✅), Chrome load-unpacked
+2. **Browser Extension** — Published on Firefox Add-ons (v1.2.0 submitted 🔄), Chrome load-unpacked
 
 ---
 
@@ -53,8 +53,8 @@
 ├── api/                    # Vercel serverless functions
 │   ├── health.js
 │   └── diagnostics.js
-├── .github/workflows/      # GitHub Actions
-│   └── publish-extension.yml  # Auto-publish to Firefox Add-ons
+├── .github/workflows/      # GitHub Actions (Telegram bot pipeline — NOT for Firefox)
+│   └── publish-extension.yml
 └── index.html              # PWA entry point
 ```
 
@@ -123,17 +123,38 @@ The test suite covers:
 ---
 
 ## Firefox Extension Status
-- **v1.1.0 approved** ✅ on addons.mozilla.org
+- **v1.2.0 submitted** 🔄 on addons.mozilla.org (v1.1.0 previously approved ✅)
 - Extension ID: `finxport@lovenishpurohit`
 - Strict min version: Firefox 140, Firefox for Android 142
 - `data_collection_permissions.required: ["none"]`
+- ZIP packaged manually: `cd extension && zip -r ../FinXport-v1.2.0.zip . --exclude "test.cjs"`
+
+## What Changed in v1.2.0
+**New Features**
+- PDF support — extract financial tables from PDFs via PDF.js, with page range picker
+- Gemini Vision — send PDF pages as images to Gemini AI for better accuracy (user provides key)
+- Changes in Equity sheet — detects and exports this statement including landscape page layouts
+
+**Improvements**
+- Gemini model chain: auto-falls back through `gemini-2.5-flash-lite` → `gemini-1.5-flash` → `gemini-1.5-flash-8b`
+- Clearer Gemini error messages: 429 (rate limit), 400 (bad key), 403 (no permission)
+- PDF column detection is position-aware — handles annual report formats ("31st March 2025")
+- Merges split labels, parses `(1510.46)` as negative, excludes Note reference columns
+
+**Bug Fixes**
+- YoY growth rows now only appear on P&L — never Balance Sheet or Cash Flow
+- YoY checkbox was not wired correctly — now actually toggles growth rows
+- PDF.js loading fixed in Firefox (dynamic `import()` replaced with module shim)
+- Export handles both PDF `{columns+object rows}` and web `{headers+array rows}` formats
+- Fixed missing `try{` before Gemini fetch loop (caused Firefox validation error)
 
 ## GitHub Actions
-`.github/workflows/publish-extension.yml` — triggers on push to `extension/**`:
-1. Bumps patch version in manifest.json
-2. Builds ZIP (excludes test.cjs)
-3. Creates GitHub Release with ZIP attached
-4. Publishes to Firefox Add-ons (requires `FIREFOX_API_KEY` + `FIREFOX_API_SECRET` secrets)
+`.github/workflows/publish-extension.yml` — **Note: this workflow is wired to the Telegram bot pipeline, NOT the Firefox extension.** Do NOT rely on it to publish to Firefox. Package and upload the ZIP manually:
+```bash
+node extension/test.cjs        # must show 0 failures
+cd extension && zip -r ../FinXport-vX.X.X.zip . --exclude "test.cjs"
+# Upload ZIP at addons.mozilla.org → Manage Submissions → Submit New Version
+```
 
 ---
 
@@ -153,7 +174,7 @@ git clone https://{PAT}@github.com/lovenishpurohit111/Financial-Convertor.git
 node extension/test.cjs   # must show 0 failures
 
 # Repackage extension ZIP
-cd extension && zip -r ../FinXport-extension.zip . --exclude "test.cjs"
+cd extension && zip -r ../FinXport-vX.X.X.zip . --exclude "test.cjs"
 ```
 
 ---
@@ -166,3 +187,4 @@ cd extension && zip -r ../FinXport-extension.zip . --exclude "test.cjs"
 - **ZIP packaging**: must zip FROM INSIDE `extension/` directory so `manifest.json` is at root
 - **Extension statement keys**: popup, content.js, and exporter.js all use dynamic keys — never hardcode `["profit-loss","balance-sheet"]` only
 - **YoY rows**: never add to Balance Sheet/Cash Flow — only P&L and only for key metrics
+- **GitHub Action**: publish-extension.yml is for Telegram bot — do NOT use it to publish to Firefox
