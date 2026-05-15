@@ -352,6 +352,7 @@ Rules:
   const MODELS = ["gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
   let res, lastErr;
   for (const model of MODELS) {
+    try {
     res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
