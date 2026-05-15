@@ -38,15 +38,28 @@ function renderMain(meta, statements, tab_url = "") {
 
   const foundCount = STMT_LIST.filter(s => s.data).length;
 
+  // Build stmt rows with checkboxes for found statements
   const stmtRows = STMT_LIST.map(s => {
     const found = !!s.data;
     const rowCount = s.data?.rows?.length || 0;
-    return `
-      <div class="stmt-row ${found ? "found" : "missing"}">
-        <div class="dot ${found ? "found" : ""}"></div>
-        <span class="stmt-name">${escHtml(s.label)}</span>
-        ${found ? `<span class="stmt-rows">${rowCount} rows</span>` : ""}
-      </div>`;
+    if (found) {
+      // Default: quarterly unchecked, everything else checked
+      const isQuarterly = s.id === "quarters" || (s.data?.name||"").toLowerCase().includes("quarter");
+      return `
+        <label class="stmt-row found" style="cursor:pointer">
+          <input type="checkbox" class="stmt-check" data-id="${escHtml(s.id)}"
+            ${isQuarterly ? "" : "checked"}
+            style="cursor:pointer;accent-color:#22c55e;flex-shrink:0" />
+          <span class="stmt-name">${escHtml(s.label)}</span>
+          <span class="stmt-rows">${rowCount} rows</span>
+        </label>`;
+    } else {
+      return `
+        <div class="stmt-row missing">
+          <div class="dot"></div>
+          <span class="stmt-name">${escHtml(s.label)}</span>
+        </div>`;
+    }
   }).join("");
 
   render(`
@@ -58,7 +71,7 @@ function renderMain(meta, statements, tab_url = "") {
       </div>
     </div>
 
-    <div class="section-label">Statements detected</div>
+    <div class="section-label">Select statements to export</div>
     <div class="statements">${stmtRows}</div>
 
     <div class="section-label">Options</div>
@@ -67,28 +80,33 @@ function renderMain(meta, statements, tab_url = "") {
         <input type="checkbox" id="opt-growth" checked />
         Add YoY growth % rows
       </label>
-      <label class="opt-row">
-        <input type="checkbox" id="opt-quarterly" />
-        Include quarterly data
-      </label>
     </div>
 
     <button class="btn-export" id="btn-export" ${foundCount === 0 ? "disabled" : ""}>
-      ⬇ Export ${foundCount} sheet${foundCount !== 1 ? "s" : ""} to Excel
+      ⬇ Export to Excel
     </button>
     <div class="status" id="status"></div>
   `);
 
+  // Update button label based on checked count
+  function updateBtnLabel() {
+    const checked = document.querySelectorAll(".stmt-check:checked").length;
+    const btn = document.getElementById("btn-export");
+    if (btn) {
+      btn.textContent = checked === 0
+        ? "Select at least one statement"
+        : `⬇ Export ${checked} sheet${checked !== 1 ? "s" : ""} to Excel`;
+      btn.disabled = checked === 0;
+    }
+  }
+  document.querySelectorAll(".stmt-check").forEach(cb => cb.addEventListener("change", updateBtnLabel));
+  updateBtnLabel();
+
   document.getElementById("btn-export")?.addEventListener("click", () => {
-    const includeQuarterly = document.getElementById("opt-quarterly")?.checked;
-
-    // Filter out quarterly unless opted in
+    const checkedIds = new Set([...document.querySelectorAll(".stmt-check:checked")].map(cb => cb.dataset.id));
     const filtered = Object.fromEntries(
-      Object.entries(statements).filter(([k, v]) =>
-        includeQuarterly || !(k === "quarters" || (v?.name||"").toLowerCase().includes("quarter"))
-      )
+      Object.entries(statements).filter(([k]) => checkedIds.has(k))
     );
-
     doExport(meta, filtered);
   });
 }
