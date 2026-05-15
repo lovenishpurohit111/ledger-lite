@@ -64,18 +64,23 @@
 
     const rows = [...table.querySelectorAll("tbody tr, tr")]
       .filter(r => r !== headerRow)
-      .map(tr => [...tr.querySelectorAll("td,th")].map(c => c.textContent.replace(/\s+/g, " ").trim()))
+      .map(tr => [...tr.querySelectorAll("td,th")].map((c, i) => {
+        let text = c.textContent.replace(/\s+/g, " ").trim();
+        // Strip trailing "+" expand buttons (Screener.in) from label column only
+        if (i === 0) text = text.replace(/\s*\+\s*$/, "").trim();
+        return text;
+      }))
       .filter(r => r.some(c => c));
 
-    // Nearby unit label
+    // Nearby unit label — walk up through section too for Screener.in
     let unit = null;
-    const wrap = table.closest("section,div") || table.parentElement;
-    if (wrap) {
+    const containers = [table.closest("section"), table.closest("div"), table.parentElement].filter(Boolean);
+    for (const wrap of containers) {
       const candidates = [...wrap.querySelectorAll("p,span,small,caption,div")]
         .filter(e => !e.querySelector("table"))
-        .map(e => e.textContent.trim())
-        .filter(t => /crore|lakh|million|rs\.?/i.test(t) && t.length < 120);
-      if (candidates.length) unit = candidates[0];
+        .map(e => e.textContent.trim().replace(/\s*\/\s*View Standalone.*/i, "").trim())
+        .filter(t => /crore|lakh|million|rs\.?/i.test(t) && t.length < 80);
+      if (candidates.length) { unit = candidates[0]; break; }
     }
 
     return rows.length ? { headers, rows, unit } : null;
