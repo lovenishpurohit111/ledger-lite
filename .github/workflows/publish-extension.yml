@@ -18,20 +18,20 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Install Node + web-ext
+      # Install Node + dependencies
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install web-ext
-        run: npm install -g web-ext
+      - name: Install dependencies
+        run: |
+          npm install jsdom --save-dev
+          npm install -g web-ext
 
       # Run extension self-tests
       - name: Run tests
-        run: |
-          cd /tmp && npm install jsdom 2>/dev/null
-          node $GITHUB_WORKSPACE/extension/test.cjs
+        run: node extension/test.cjs
 
       # Build ZIP (from inside extension/ so manifest.json is at root)
       - name: Build ZIP
@@ -54,7 +54,7 @@ jobs:
           files: FinXport-v${{ steps.ver.outputs.version }}.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Submit to Firefox Add-ons (requires FIREFOX_API_KEY + FIREFOX_API_SECRET secrets)
+      # Submit to Firefox Add-ons
       - name: Submit to Firefox Add-ons
         env:
           FIREFOX_API_KEY: ${{ secrets.FIREFOX_API_KEY }}
