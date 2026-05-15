@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FinXport \u2013 Financial Statements to Excel",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Export P&L, Balance Sheet and Cash Flow from Screener.in, Tickertape & Moneycontrol to Excel in one click.",
   "permissions": [
     "activeTab",
