@@ -158,12 +158,25 @@ The test suite covers:
 - Fixed missing `try{` before Gemini fetch loop (caused Firefox validation error)
 
 ## GitHub Actions
-`.github/workflows/publish-extension.yml` — **Note: this workflow is wired to the Telegram bot pipeline, NOT the Firefox extension.** Do NOT rely on it to publish to Firefox. Package and upload the ZIP manually:
-```bash
-node extension/test.cjs        # must show 0 failures
-cd extension && zip -r ../FinXport-vX.X.X.zip . --exclude "test.cjs"
-# Upload ZIP at addons.mozilla.org → Manage Submissions → Submit New Version
-```
+
+### `publish-extension.yml` — Firefox Auto-Publish
+Triggers on push to `extension/**` on `main`. Does NOT auto-bump version (manage versions manually).
+
+Steps:
+1. Reads version from `manifest.json`
+2. Runs `node extension/test.cjs` — fails fast if any test breaks
+3. Builds ZIP from inside `extension/` (so `manifest.json` is at root)
+4. Creates a GitHub Release with ZIP attached
+5. Submits to Firefox Add-ons via `web-ext sign`
+
+**Required secrets** (Settings → Secrets and variables → Actions):
+- `FIREFOX_API_KEY` — JWT issuer from addons.mozilla.org → Manage API Keys
+- `FIREFOX_API_SECRET` — JWT secret from addons.mozilla.org → Manage API Keys
+
+### `telegram-pdf-convert.yml` — Telegram Bot
+Triggered via `workflow_dispatch` by the Telegram bot when a user sends a file.
+Uses `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` secrets.
+**Completely separate from the extension pipeline — do not modify.**
 
 ---
 
