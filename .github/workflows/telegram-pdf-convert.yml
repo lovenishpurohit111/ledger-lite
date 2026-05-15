@@ -33,6 +33,15 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt
 
+      - name: Notify download started
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            --data-urlencode text="Downloading your file..."
+
       - name: Download upload from Telegram
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -49,7 +58,22 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: python scripts/run_telegram_conversion.py --input "$INPUT_FILE" --output work/financials-conversion.xlsx
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ inputs.chat_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            --data-urlencode text="Extracting table data. This can take a minute..."
+          while true; do
+            curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendChatAction" \
+              -d chat_id="${CHAT_ID}" \
+              -d action="upload_document" >/dev/null || true
+            sleep 4
+          done &
+          ACTION_PID=$!
+          trap 'kill "$ACTION_PID" 2>/dev/null || true' EXIT
+          python scripts/run_telegram_conversion.py --input "$INPUT_FILE" --output work/financials-conversion.xlsx
+          kill "$ACTION_PID" 2>/dev/null || true
 
       - name: Send Excel to Telegram
         if: success()
@@ -72,4 +96,4 @@ jobs:
         run: |
           curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -d chat_id="${CHAT_ID}" \
-            --data-urlencode text="Conversion failed. Please try a clearer PDF."
+            --data-urlencode text="Conversion failed. Please send a clearer PDF or upload the image as a file/document instead of a compressed photo."

@@ -84,8 +84,7 @@ def build_table(tokens, text: str) -> dict | None:
         if index <= header_index:
             continue
 
-        label = " ".join(word["text"] for word in row_words if center_x(word) < cut_x)
-        label = re.sub(r"[+*|<>:]+$", "", re.sub(r"\s+", " ", label)).strip()
+        label = clean_label(" ".join(word["text"] for word in row_words if center_x(word) < cut_x))
         if not label or len(label) < 2 or label.isdigit() or SKIP_RE.match(label):
             continue
 
@@ -190,6 +189,13 @@ def merge_number_fragments(words: list[dict]) -> list[dict]:
             merged.append(current)
             index += 1
     return merged
+
+
+def clean_label(value: str) -> str:
+    parts = re.sub(r"\s+", " ", value).strip().split()
+    while parts and (parse_number(parts[-1]) is not None or parts[-1] in {"+", "-", "|"}):
+        parts.pop()
+    return re.sub(r"[+*|<>:]+$", "", " ".join(parts)).strip()
 
 
 def write_table_workbook(table: dict, output_path: Path) -> None:

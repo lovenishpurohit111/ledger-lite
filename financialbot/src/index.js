@@ -1,4 +1,4 @@
-const VERSION = "financialbot-debug-2026-05-14-accept-images";
+const VERSION = "financialbot-debug-2026-05-15-progress-images";
 
 export default {
   async fetch(request, env) {
@@ -40,7 +40,9 @@ export default {
 
       await sendTelegram(env, "sendMessage", {
         chat_id: chatId,
-        text: "Processing your financial statement..."
+        text: upload.kind === "photo"
+          ? "Processing your financial statement... For best Excel quality, send screenshots as a file/document instead of a compressed photo."
+          : "Processing your financial statement..."
       });
 
       const inputs = {
@@ -79,7 +81,8 @@ function getSupportedUpload(message) {
   if (isSupportedDocument(document)) {
     return {
       file_id: document.file_id,
-      file_name: document.file_name || defaultName(document.mime_type)
+      file_name: document.file_name || defaultName(document.mime_type),
+      kind: "document"
     };
   }
 
@@ -87,7 +90,8 @@ function getSupportedUpload(message) {
   if (photo?.file_id) {
     return {
       file_id: photo.file_id,
-      file_name: "financial-statement.jpg"
+      file_name: "financial-statement.jpg",
+      kind: "photo"
     };
   }
 
