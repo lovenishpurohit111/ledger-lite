@@ -190,6 +190,37 @@ function parseTSV(tsv) {
   });
 }
 
+// Split OCR-fused tokens that jam a day+year together, e.g.:
+//   "31,2024"  → [{text:"31,"}, {text:"2024"}]   (no space after comma)
+//   "31,2025"  → [{text:"31,"}, {text:"2025"}]
+//   "March31," → [{text:"March"}, {text:"31,"}]   (month glued to day)
+// Splits the bbox proportionally by character count.
+function splitFusedTokens(words) {
+  const out = [];
+  for (const w of words) {
+    // Pattern: digits+comma+4-digit-year fused, e.g. "31,2024"
+    const dayYear = w.text.match(/^(\d{1,2},?)(\d{4})$/);
+    if (dayYear) {
+      const [, day, year] = dayYear;
+      const splitX = Math.round(w.bbox.x0 + (w.bbox.x1 - w.bbox.x0) * day.length / w.text.length);
+      out.push({ text: day.endsWith(",") ? day : day+",", conf: w.conf, bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: splitX, y1: w.bbox.y1 } });
+      out.push({ text: year, conf: w.conf, bbox: { x0: splitX, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } });
+      continue;
+    }
+    // Pattern: month glued to day, e.g. "March31" or "March31,"
+    const monthDay = w.text.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(\d{1,2},?)$/i);
+    if (monthDay) {
+      const [, month, day] = monthDay;
+      const splitX = Math.round(w.bbox.x0 + (w.bbox.x1 - w.bbox.x0) * month.length / w.text.length);
+      out.push({ text: month, conf: w.conf, bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: splitX, y1: w.bbox.y1 } });
+      out.push({ text: day, conf: w.conf, bbox: { x0: splitX, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } });
+      continue;
+    }
+    out.push(w);
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -520,7 +551,8 @@ export async function processImages(files, onProgress) {
     try {
       const {data} = await worker.recognize(url, {}, {text:true,tsv:true});
       const text  = data?.text||"";
-      const words = parseTSV(data?.tsv||"");
+      const rawWords = parseTSV(data?.tsv||"");
+      const words = splitFusedTokens(rawWords);
 
       // DEBUG — remove after diagnosis
       console.log("=== OCR RAW TEXT ===\n", text.slice(0, 800));
