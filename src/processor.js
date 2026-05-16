@@ -530,17 +530,14 @@ export async function processImages(files, onProgress) {
       const words = splitFusedTokens(rawWords);
       const td    = words.length ? buildTable(words,text) : null;
 
-      if(td&&td.rows.length>0) {
-        // OCR succeeded — use result directly, no Gemini needed
-        all.push({id:crypto.randomUUID(),statement_type:stmtType(text),unit:extractUnit(text)||"Figures in Rs. Crores",rows:td.rows,tableData:td});
+      // Try Gemini first (clean structured extraction), fall back to OCR
+      const geminiResult = await extractWithGemini(file);
+      if(geminiResult&&geminiResult.rows&&geminiResult.rows.length>0) {
+        all.push({id:crypto.randomUUID(),source:"gemini",statement_type:stmtType(geminiResult.rows.map(r=>r.label).join(" ")),unit:extractUnit(text)||"Figures in Rs. Lacs",rows:geminiResult.rows,tableData:geminiResult});
+      } else if(td&&td.rows.length>0) {
+        all.push({id:crypto.randomUUID(),source:"ocr",statement_type:stmtType(text),unit:extractUnit(text)||"Figures in Rs. Crores",rows:td.rows,tableData:td});
       } else {
-        // OCR returned no rows — try Gemini Vision as fallback (silently skipped if no key or rate-limited)
-        const geminiResult = await extractWithGemini(file);
-        if(geminiResult&&geminiResult.rows&&geminiResult.rows.length>0) {
-          all.push({id:crypto.randomUUID(),statement_type:stmtType(geminiResult.rows.map(r=>r.label).join(" ")),unit:"Figures in Rs. Lacs",rows:geminiResult.rows,tableData:geminiResult});
-        } else {
-          throw new Error("Could not detect a financial table. Ensure the screenshot includes the full header row with column years.");
-        }
+        throw new Error("Could not detect a financial table. Ensure the screenshot includes the full header row with column years.");
       }
     } finally {
       URL.revokeObjectURL(url);

@@ -56,6 +56,35 @@ function App() {
     }
   }, []);
 
+  // Auto-check API health + Gemini status on page load
+  React.useEffect(() => {
+    async function checkOnLoad() {
+      try {
+        setChecks((current) => updateCheck(current, "health", checkRunning("Checking API...")));
+        const health = await fetchJson("/api/health").catch(() => ({ ok: false }));
+        setChecks((current) => updateCheck(current, "health", health.ok ? checkPass("API reachable.") : checkFail("API unreachable.")));
+
+        setChecks((current) => updateCheck(current, "gemini", checkRunning("Testing Gemini key...")));
+        const diagnostics = await fetchJson("/api/diagnostics").catch(() => ({ geminiConfigured: false, geminiStatus: "network" }));
+        setChecks((current) => ({
+          ...current,
+          gemini: { ...current.gemini, ...(
+            diagnostics.geminiConfigured
+              ? checkPass(diagnostics.message || "Gemini API key is working.")
+              : diagnostics.geminiStatus === "invalid_key"
+                ? checkFail("Gemini key is invalid. Check Google Cloud Console.")
+                : diagnostics.geminiStatus === "rate_limit"
+                  ? checkWarn("Gemini key works but is currently rate-limited.")
+                  : diagnostics.geminiStatus === "no_models_available"
+                    ? checkFail("Gemini key present but no models accessible. Enable Gemini API in Google Cloud.")
+                    : checkWarn("Gemini not configured — running in OCR-only mode.")
+          ) },
+        }));
+      } catch { /* silent — don't block UI */ }
+    }
+    checkOnLoad();
+  }, []);
+
   React.useEffect(() => {
     function handlePaste(event) {
       const pastedFiles = filesFromClipboardItems(event.clipboardData?.items);
@@ -110,10 +139,17 @@ function App() {
         setJob((j) => ({ ...j, message: `OCR in progress: ${pct}%` }));
       });
       if (!statements.length) throw new Error("No financial data could be extracted. Try a clearer image.");
+
+      // Check if Gemini was used (processImages sets source on each statement)
+      const geminiUsed = statements.some(s => s.source === "gemini");
       setChecks((current) => ({
         ...current,
-        worker: checkPass("OCR completed successfully."),
+        worker: checkPass(geminiUsed ? "Gemini extraction completed." : "OCR completed successfully."),
+        gemini: geminiUsed
+          ? checkPass("Gemini used — clean extraction.")
+          : { ...current.gemini }, // keep existing status from page-load check
         conversion: checkPass(`Extracted ${statements.length} statement(s).`)
+      }));
       }));
       setJob({
         job_id: crypto.randomUUID(),
