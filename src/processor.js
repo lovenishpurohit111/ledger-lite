@@ -521,7 +521,17 @@ export async function processImages(files, onProgress) {
       const {data} = await worker.recognize(url, {}, {text:true,tsv:true});
       const text  = data?.text||"";
       const words = parseTSV(data?.tsv||"");
+
+      // DEBUG — remove after diagnosis
+      console.log("=== OCR RAW TEXT ===\n", text.slice(0, 800));
+      console.log("=== OCR WORD COUNT ===", words.length);
+      if (words.length > 0) {
+        const rows = toRows(words);
+        console.log("=== OCR ROWS (first 8) ===", rows.slice(0,8).map(r=>r.words.map(w=>w.text).join(" | ")));
+      }
+
       const td    = words.length ? buildTable(words,text) : null;
+      console.log("=== buildTable result ===", td ? `${td.rows.length} rows, cols: ${td.columns}` : "NULL");
 
       if(td&&td.rows.length>0) {
         // OCR succeeded — use result directly, no Gemini needed
