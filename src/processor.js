@@ -232,6 +232,14 @@ function detectCols(rows) {
           cols.push({header:`${ws[i].text} ${yearText}`,cx:(ws[i].bbox.x0+ws[i+3].bbox.x1)/2});
           i+=3;
         }
+        // bare "Month" with no year following — skip (will be caught by bare-year logic below)
+        else { /* month token without year, skip */ }
+      } else if(cols.length > 0 && YEAR_RE.test(ws[i].text.replace(/[,.]$/,""))) {
+          // Bare year after a column header — inherit month from last col (e.g. "March 31, 2025  2024")
+          const lastMonth = cols[cols.length-1].header.split(" ")[0];
+          const yearText = ws[i].text.replace(/[,.]$/,"");
+          const expectedCx = cols[cols.length-1].cx + (cols.length > 1 ? cols[cols.length-1].cx - cols[cols.length-2].cx : 150);
+          cols.push({header:`${lastMonth} ${yearText}`, cx: (ws[i].bbox.x0+ws[i].bbox.x1)/2});
       } else if(/^T+M[.,:]?$|^(TTM|LTM)$/i.test(ws[i].text.trim())) {
         // catches TTM, TIM, TTW etc. (OCR misreads), also LTM
         cols.push({header:"TTM",cx:(ws[i].bbox.x0+ws[i].bbox.x1)/2});
