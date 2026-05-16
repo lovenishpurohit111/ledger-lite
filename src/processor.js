@@ -53,26 +53,41 @@ async function preprocessImage(file) {
       const n = d.length;
 
       // ── 0. Color-aware normalisation ──────────────────────────────────────
-      // For colored-background pixels (e.g. red column headers with white text):
-      // use min(R,G,B) for dark-text regions, and 255-max(R,G,B) for colored-bg
-      // pixels so that white-on-red → dark-on-light, readable by Tesseract.
-      // Also track which pixels were colored so we can skip shadow removal there.
-      const isColored = new Uint8Array(W * H); // 1 = was a saturated colored bg pixel
-      for (let i = 0, p = 0; i < n; i += 4, p++) {
-        const r = d[i], g = d[i+1], b = d[i+2];
-        const minCh = Math.min(r, g, b);
-        const maxCh = Math.max(r, g, b);
-        if (maxCh - minCh > 60 && maxCh < 245) {
-          // Saturated pixel: colored background (red, blue, green header, etc.)
-          // Map to grayscale using min channel: dark ink on any bg stays dark.
-          // For the bg itself: min-channel will be low (e.g. red bg: min~45 → dark).
-          // For white text on colored bg: min~255 → stays white.
-          // This gives white-on-dark which Tesseract can read after we invert below.
-          const v = 255 - maxCh; // invert the dominant channel: colored bg → near-black
-          d[i] = d[i+1] = d[i+2] = v;
-          isColored[p] = 1;
+      // Strategy: scan each row. If >30% of pixels in a row are "saturated colored"
+      // (e.g. red/blue header band), treat the ENTIRE row as inverted — map to
+      // grayscale using (255 - luminance) so white text → black, colored bg → light.
+      // This handles white-on-red column headers like "March 31, 2025".
+      const isColored = new Uint8Array(W * H); // 1 = pixel is in a colored-bg row
+
+      // First pass: classify each row as colored-band or normal
+      const rowIsColored = new Uint8Array(H);
+      for (let y = 0; y < H; y++) {
+        let coloredCount = 0;
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 4;
+          const r = d[i], g = d[i+1], b = d[i+2];
+          const minCh = Math.min(r, g, b), maxCh = Math.max(r, g, b);
+          // Saturated colored pixel: high chroma, not near-white/near-black
+          if (maxCh - minCh > 50 && maxCh > 80 && maxCh < 250) coloredCount++;
         }
-        // else: leave normal light-bg pixels unchanged for standard grayscale
+        if (coloredCount / W > 0.25) rowIsColored[y] = 1; // >25% colored = colored row
+      }
+
+      // Second pass: for colored rows, invert luminance so white text → dark
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const p = y * W + x;
+          const i = p * 4;
+          const r = d[i], g = d[i+1], b = d[i+2];
+          if (rowIsColored[y]) {
+            // Invert: white text (high lum) → near-black, colored bg → light gray
+            const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+            const inv = 255 - lum;
+            d[i] = d[i+1] = d[i+2] = inv;
+            isColored[p] = 1;
+          }
+          // else: leave normal light-bg pixels unchanged
+        }
       }
 
       // ── 1. Grayscale (luminance-weighted) ──────────────────────────────────
