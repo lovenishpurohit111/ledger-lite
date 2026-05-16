@@ -366,22 +366,44 @@ function assign(rowWords, cols, cutX) {
 }
 
 
-// Merge fragments like ['79,','809'] → one word '79,809' at merged position
+// Merge number fragments OCR splits across tokens:
+// ['40,563.', '52'] → '40,563.52'   (decimal split)
+// ['79,', '809']    → '79,809'       (comma-thousands split)
+// Also strips Indian lakh formatting: '1,36,512' → correct float
 function mergeNumberFragments(words) {
   const out = [];
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     const next = words[i+1];
-    // If current ends with comma and next is digits, merge them
-    if (/^-?[\d,]*\d,$/.test(w.text) && next && /^\d+$/.test(next.text)) {
+    // ends with comma OR decimal point → merge with next digits
+    if ((/^-?[\d,]*\d[,.]$/.test(w.text)) && next && /^\d+$/.test(next.text)) {
       out.push({ text: w.text + next.text, conf: Math.min(w.conf, next.conf),
         bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: next.bbox.x1, y1: next.bbox.y1 } });
-      i++; // skip next
+      i++;
     } else {
       out.push(w);
     }
   }
   return out;
+}
+
+// Clean a raw OCR label — remove junk prefixes/suffixes, normalize spacing
+function cleanLabel(raw) {
+  return raw
+    .replace(/^[^a-zA-Z\u0900-\u097F(]+/, "")   // strip leading non-alpha (a), b), ©, —, etc.)
+    .replace(/[+*©®™|<>\[\]:=_—–-]+\s*$/g, "")  // strip trailing junk
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+// Is this label clearly OCR garbage? (too many non-alpha chars, or known noise patterns)
+function isGarbageLabel(label) {
+  if (!label || label.length < 2) return true;
+  const alphaRatio = (label.match(/[a-zA-Z]/g)||[]).length / label.length;
+  if (alphaRatio < 0.35 && label.length > 4) return true;          // mostly symbols/digits
+  if (/^[\d\s,.()\-—–=_|]+$/.test(label)) return true;             // pure numbers/symbols
+  if (/^[^a-zA-Z]{3,}/.test(label)) return true;                    // starts with 3+ non-alpha
+  return false;
 }
 
 function buildTable(words, text) {
@@ -391,6 +413,9 @@ function buildTable(words, text) {
   if(!ci||ci.cols.length<2) return null;
   const {hri,cols,noteX}=ci;
   const cutX=cols[0].cx-(cols[1]?(cols[1].cx-cols[0].cx)*0.5:60);
+  // Note zone: between cutX and first value col (with margin)
+  const noteZoneL = cutX;
+  const noteZoneR = cols[0].cx - 10;
   let section="General";
   const trows=[];
 
@@ -399,26 +424,27 @@ function buildTable(words, text) {
     const rw=rows[ri].words;
     if(!rw.length) continue;
 
-    const label=rw.filter(w=>(w.bbox.x0+w.bbox.x1)/2<cutX)
-      .map(w=>w.text).join(" ").replace(/[+*©®™|<>:]+$/,"").replace(/\s+/g," ").trim();
+    const rawLabel=rw.filter(w=>(w.bbox.x0+w.bbox.x1)/2<cutX)
+      .map(w=>w.text).join(" ");
+    const label = cleanLabel(rawLabel);
 
-    if(!label||label.length<2||/^[\d\s,.()\-]+$/.test(label)||SKIP_RE.test(label)) continue;
+    if(isGarbageLabel(label)||SKIP_RE.test(label)) continue;
 
     const mergedRw = mergeNumberFragments(rw);
     const vals=assign(mergedRw,cols,cutX);
 
-    // Extract note number: short digit token near noteX (between label zone and first value col)
+    // Extract note number: scan the zone between label cutX and first value col
     let note=null;
-    if(noteX) {
-      const noteTol=40;
-      const noteCandidate=rw.find(w=>{
-        const cx=(w.bbox.x0+w.bbox.x1)/2;
-        return Math.abs(cx-noteX)<noteTol && /^\d{1,2}[A-Z]?$/.test(w.text.trim());
-      });
-      if(noteCandidate) note=noteCandidate.text.trim();
-    }
+    const noteCandidates = rw.filter(w => {
+      const cx=(w.bbox.x0+w.bbox.x1)/2;
+      const inZone = noteX
+        ? Math.abs(cx-noteX) < 50
+        : (cx > noteZoneL && cx < noteZoneR);
+      return inZone && /^\d{1,2}[A-Z]?$/.test(w.text.trim());
+    });
+    if(noteCandidates.length) note = noteCandidates[0].text.trim();
 
-    // Detect ALL CAPS section headers (e.g. "NON-CURRENT ASSETS", "EQUITY AND LIABILITIES")
+    // Detect ALL CAPS section headers (e.g. "NON-CURRENT ASSETS")
     const isAllCaps=label.length>3&&label===label.toUpperCase()&&/[A-Z]/.test(label);
 
     // Keep row if it has values OR it's a section header
@@ -553,17 +579,7 @@ export async function processImages(files, onProgress) {
       const text  = data?.text||"";
       const rawWords = parseTSV(data?.tsv||"");
       const words = splitFusedTokens(rawWords);
-
-      // DEBUG — remove after diagnosis
-      console.log("=== OCR RAW TEXT ===\n", text.slice(0, 800));
-      console.log("=== OCR WORD COUNT ===", words.length);
-      if (words.length > 0) {
-        const rows = toRows(words);
-        console.log("=== OCR ROWS (first 8) ===", rows.slice(0,8).map(r=>r.words.map(w=>w.text).join(" | ")));
-      }
-
       const td    = words.length ? buildTable(words,text) : null;
-      console.log("=== buildTable result ===", td ? `${td.rows.length} rows, cols: ${td.columns}` : "NULL");
 
       if(td&&td.rows.length>0) {
         // OCR succeeded — use result directly, no Gemini needed
@@ -596,7 +612,7 @@ export function exportToExcel(statements) {
     const td=stmt.tableData;
     const yrs=td?td.columns:["Amount (₹ Cr)"];
     const hasNote=td&&td.rows.some(r=>r.note);
-    const hdr=hasNote?["Line Item","Note",...yrs]:["Line Item",...yrs];
+    const hdr=hasNote?["Particulars","Note",...yrs]:["Particulars",...yrs];
     const body=(td?td.rows:stmt.rows).map(r=>{
       const vals=td?r.values.map(v=>v??[]):[r.amount];
       return hasNote?[r.label,r.note||"",...vals]:[r.label,...vals];
