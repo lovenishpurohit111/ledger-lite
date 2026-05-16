@@ -391,7 +391,8 @@ async function extractWithGemini(file) {
     }));
 
     return { columns: data.columns, rows };
-  } catch {
+  } catch(e) {
+    console.error('[Gemini fallback error]', e);
     return null;
   }
 }

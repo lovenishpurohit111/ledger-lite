@@ -13,7 +13,22 @@ export default async function handler(request, response) {
     return response.status(503).json({ error: "Gemini API key not configured" });
   }
 
-  const { image, mimeType = "image/png" } = request.body || {};
+  // Parse body manually — Vercel raw handlers may not auto-parse JSON
+  let body = request.body;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
+  if (!body || typeof body !== "object") {
+    // Try reading raw stream
+    body = await new Promise((resolve) => {
+      let raw = "";
+      request.on("data", chunk => { raw += chunk; });
+      request.on("end", () => {
+        try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+      });
+    });
+  }
+  const { image, mimeType = "image/png" } = body || {};
   if (!image) {
     return response.status(400).json({ error: "Missing image field" });
   }
@@ -93,3 +108,11 @@ Rules:
     return response.status(500).json({ error: err.message });
   }
 }
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "10mb",
+    },
+  },
+};
