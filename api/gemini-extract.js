@@ -1,8 +1,40 @@
-/**
- * POST /api/gemini-extract
- * Body: { image: "<base64 PNG/JPG>", mimeType: "image/png" }
- * Returns: { columns: string[], rows: [{label, note, values, is_bold, row_type}] }
- */
+import https from "https";
+
+function httpsPost(url, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const parsed = new URL(url);
+    const opts = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+    const req = https.request(opts, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function readBody(request) {
+  return new Promise((resolve) => {
+    if (request.body && typeof request.body === "object") return resolve(request.body);
+    let raw = "";
+    request.on("data", (c) => (raw += c));
+    request.on("end", () => {
+      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+    });
+  });
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
     return response.status(405).json({ error: "Method not allowed" });
@@ -13,106 +45,40 @@ export default async function handler(request, response) {
     return response.status(503).json({ error: "Gemini API key not configured" });
   }
 
-  // Parse body manually — Vercel raw handlers may not auto-parse JSON
-  let body = request.body;
-  if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch { body = {}; }
-  }
-  if (!body || typeof body !== "object") {
-    // Try reading raw stream
-    body = await new Promise((resolve) => {
-      let raw = "";
-      request.on("data", chunk => { raw += chunk; });
-      request.on("end", () => {
-        try { resolve(JSON.parse(raw)); } catch { resolve({}); }
-      });
-    });
-  }
-  const { image, mimeType = "image/png" } = body || {};
+  const body = await readBody(request);
+  const { image, mimeType = "image/png" } = body;
+
   if (!image) {
     return response.status(400).json({ error: "Missing image field" });
   }
 
-  const prompt = `You are a financial data extraction expert. Extract the financial table from this image.
-
-Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
-{
-  "columns": ["Mar 2025", "Mar 2024"],
-  "rows": [
-    {
-      "label": "Non-Current Assets",
-      "note": null,
-      "values": [null, null],
-      "is_bold": true,
-      "row_type": "header"
-    },
-    {
-      "label": "Property, Plant & Equipment",
-      "note": "1",
-      "values": [40563.52, 34436.76],
-      "is_bold": false,
-      "row_type": "line_item"
-    }
-  ]
-}
-
-Rules:
-- "columns": array of year/period headers found in the table (e.g. "Mar 2025", "Mar 2024")
-- "rows": every row in the table including section headers, line items, subtotals, totals
-- "label": the row description text
-- "note": the note number (e.g. "1", "2A") or null if not present
-- "values": numeric values for each column (null if blank/dash), NO commas in numbers
-- "is_bold": true for section headers (ALL CAPS), totals, subtotals
-- "row_type": "header" for ALL-CAPS section headers, "total" for totals, "subtotal" for subtotals, "line_item" for everything else
-- Preserve ALL rows exactly as shown including blank-value section headers
-- Do not skip any rows`;
+  const prompt = `Extract the financial table from this image. Return ONLY valid JSON, no markdown fences:
+{"columns":["Mar 2025","Mar 2024"],"rows":[{"label":"NON-CURRENT ASSETS","note":null,"values":[null,null],"is_bold":true,"row_type":"header"},{"label":"Property, Plant & Equipment","note":"1","values":[40563.52,34436.76],"is_bold":false,"row_type":"line_item"}]}
+Rules: columns=year headers; note=note number or null; values=numbers per column (null if blank, NO commas in numbers); is_bold=true for ALL-CAPS headers/totals/subtotals; row_type=header|total|subtotal|line_item. Include ALL rows.`;
 
   try {
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: image } }
-            ]
-          }],
-          generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-        })
-      }
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const payload = {
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: image } }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+    };
 
-    if (!geminiResponse.ok) {
-      const err = await geminiResponse.text();
-      return response.status(502).json({ error: `Gemini API error: ${err.slice(0, 200)}` });
+    const result = await httpsPost(url, payload);
+
+    if (result.status !== 200) {
+      return response.status(502).json({ error: `Gemini ${result.status}`, detail: result.body.slice(0, 300) });
     }
 
-    const data = await geminiResponse.json();
+    const data = JSON.parse(result.body);
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-    // Strip markdown fences if present
     const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
     let parsed;
-    try {
-      parsed = JSON.parse(clean);
-    } catch {
-      return response.status(502).json({ error: "Gemini returned non-JSON", raw: text.slice(0, 500) });
-    }
+    try { parsed = JSON.parse(clean); }
+    catch { return response.status(502).json({ error: "Non-JSON from Gemini", raw: text.slice(0, 300) }); }
 
     return response.status(200).json(parsed);
   } catch (err) {
     return response.status(500).json({ error: err.message });
   }
 }
-
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "10mb",
-    },
-  },
-};
