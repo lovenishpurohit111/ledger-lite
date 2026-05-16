@@ -50,6 +50,27 @@ async function preprocessImage(file) {
       const d = imageData.data;
       const n = d.length;
 
+      // ── 0. Color-aware normalisation ──────────────────────────────────────
+      // Handles white text on colored backgrounds (e.g. red/dark column headers).
+      // For each pixel: if R channel significantly dominates G and B (colored bg),
+      // use the minimum channel (ink proxy) and invert so white text → black ink.
+      for (let i = 0; i < n; i += 4) {
+        const r = d[i], g = d[i+1], b = d[i+2];
+        const minCh = Math.min(r, g, b);
+        const maxCh = Math.max(r, g, b);
+        const saturation = maxCh - minCh;
+        // Saturated pixel = colored background (sat > 60 and not near-white)
+        if (saturation > 60 && maxCh < 240) {
+          // White text on color: brightness is high → map to black (dark ink)
+          // Dark text on color: brightness is low → map to white (no ink)
+          const brightness = Math.round(0.299*r + 0.587*g + 0.114*b);
+          // Invert: high brightness (white text) → dark; low brightness (dark bg) → white
+          const ink = 255 - brightness;
+          d[i] = d[i+1] = d[i+2] = Math.max(0, Math.min(255, ink));
+        }
+        // else: normal light background, leave as-is for standard grayscale
+      }
+
       // ── 1. Grayscale (luminance-weighted) ──────────────────────────────────
       const gray = new Uint8ClampedArray(W * H);
       for (let i = 0, p = 0; i < n; i += 4, p++) {
@@ -196,10 +217,17 @@ function detectCols(rows) {
           cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2});
           i++;
         }
-        // "Month DD[,] YYYY" — 3-token (e.g. "March 31, 2025")
-        else if(ws[i+1]&&ws[i+2]&&YEAR_RE.test(ws[i+2].text)) {
-          cols.push({header:`${ws[i].text} ${ws[i+2].text}`,cx:(ws[i].bbox.x0+ws[i+2].bbox.x1)/2});
+        // "Month DD[,] YYYY" — 3-token (e.g. "March 31, 2025") — day may have trailing comma
+        else if(ws[i+1]&&ws[i+2]&&YEAR_RE.test(ws[i+2].text.replace(/[,.]$/,""))) {
+          const yearText=ws[i+2].text.replace(/[,.]$/,"");
+          cols.push({header:`${ws[i].text} ${yearText}`,cx:(ws[i].bbox.x0+ws[i+2].bbox.x1)/2});
           i+=2;
+        }
+        // "Month DD , YYYY" — 4-token (OCR splits comma separately)
+        else if(ws[i+1]&&ws[i+2]&&ws[i+3]&&YEAR_RE.test(ws[i+3].text.replace(/[,.]$/,""))) {
+          const yearText=ws[i+3].text.replace(/[,.]$/,"");
+          cols.push({header:`${ws[i].text} ${yearText}`,cx:(ws[i].bbox.x0+ws[i+3].bbox.x1)/2});
+          i+=3;
         }
       } else if(/^T+M[.,:]?$|^(TTM|LTM)$/i.test(ws[i].text.trim())) {
         // catches TTM, TIM, TTW etc. (OCR misreads), also LTM
