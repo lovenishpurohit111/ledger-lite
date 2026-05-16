@@ -150,7 +150,6 @@ function App() {
           : { ...current.gemini }, // keep existing status from page-load check
         conversion: checkPass(`Extracted ${statements.length} statement(s).`)
       }));
-      }));
       setJob({
         job_id: crypto.randomUUID(),
         status: "completed",
