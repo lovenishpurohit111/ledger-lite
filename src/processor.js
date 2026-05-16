@@ -359,6 +359,13 @@ function buildTable(words, text) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function extractWithGemini(file) {
   try {
+    // Get Gemini key from config endpoint
+    const cfgRes = await fetch("/api/config");
+    if (!cfgRes.ok) return null;
+    const { geminiKey } = await cfgRes.json();
+    if (!geminiKey) return null;
+
+    // Convert file to base64
     const base64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result.split(",")[1]);
@@ -366,36 +373,43 @@ async function extractWithGemini(file) {
       reader.readAsDataURL(file);
     });
 
+    const prompt = `Extract the financial table from this image. Return ONLY valid JSON (no markdown):
+{"columns":["Mar 2025","Mar 2024"],"rows":[{"label":"NON-CURRENT ASSETS","note":null,"values":[null,null],"is_bold":true,"row_type":"header"},{"label":"Property, Plant & Equipment","note":"1","values":[40563.52,34436.76],"is_bold":false,"row_type":"line_item"}]}
+Rules: columns=year headers; note=note number string or null; values=numbers per column (null if blank, no commas); is_bold=true for ALL-CAPS headers/totals/subtotals; row_type=header|total|subtotal|line_item. Include ALL rows.`;
+
     const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 25000);
-    const res = await fetch("/api/gemini-extract", { signal: ctrl.signal,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: base64, mimeType: file.type || "image/png" })
-    });
-
+    const timeout = setTimeout(() => ctrl.abort(), 30000);
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        signal: ctrl.signal,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type || "image/png", data: base64 } }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+        }),
+      }
+    );
     clearTimeout(timeout);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.columns || !data.rows) return null;
+    if (!r.ok) return null;
+    const data = await r.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+    const parsed = JSON.parse(clean);
+    if (!parsed.columns || !parsed.rows) return null;
 
-    const rows = data.rows.map(r => ({
-      id: crypto.randomUUID(),
-      label: r.label || "",
-      section: "General",
-      note: r.note || null,
-      is_bold: !!r.is_bold,
-      row_type: r.row_type || "line_item",
-      values: r.values || [],
-      amount: (r.values || []).filter(v => v !== null)[0] ?? 0,
-      level: 1,
-      confidence: 0.95,
-      issues: []
-    }));
-
-    return { columns: data.columns, rows };
+    return {
+      columns: parsed.columns,
+      rows: parsed.rows.map(r => ({
+        id: crypto.randomUUID(), label: r.label || "", section: "General",
+        note: r.note || null, is_bold: !!r.is_bold, row_type: r.row_type || "line_item",
+        values: r.values || [], amount: (r.values||[]).find(v=>v!==null)??0,
+        level: 1, confidence: 0.95, issues: []
+      }))
+    };
   } catch(e) {
-    console.error('[Gemini fallback error]', e);
+    console.error("[Gemini fallback error]", e);
     return null;
   }
 }

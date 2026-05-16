@@ -32,6 +32,10 @@ export function createApp() {
     });
   });
 
+  app.get("/api/config", (_req, res) => {
+    res.json({ geminiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "" });
+  });
+
   app.post("/api/gemini-extract", async (request, response) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (!apiKey) return response.status(503).json({ error: "Gemini API key not configured" });
