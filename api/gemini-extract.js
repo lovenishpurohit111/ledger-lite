@@ -1,11 +1,24 @@
+function parseBody(req) {
+  return new Promise((resolve) => {
+    if (req.body && typeof req.body === "object") return resolve(req.body);
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+    });
+    req.on("error", () => resolve({}));
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "Gemini API key not configured" });
 
-  const { image, mimeType = "image/png" } = req.body || {};
-  if (!image) return res.status(400).json({ error: "Missing image", bodyType: typeof req.body });
+  const body = await parseBody(req);
+  const { image, mimeType = "image/png" } = body;
+  if (!image) return res.status(400).json({ error: "Missing image" });
 
   const prompt = `Extract the financial table from this image. Return ONLY valid JSON (no markdown):
 {"columns":["Mar 2025","Mar 2024"],"rows":[{"label":"NON-CURRENT ASSETS","note":null,"values":[null,null],"is_bold":true,"row_type":"header"},{"label":"Property, Plant & Equipment","note":"1","values":[40563.52,34436.76],"is_bold":false,"row_type":"line_item"}]}
