@@ -31,8 +31,8 @@ async function preprocessImage(file) {
     const url = URL.createObjectURL(file);
 
     img.onload = () => {
-      // Scale up 2× — Tesseract accuracy improves significantly at higher res
-      const SCALE = img.width < 2000 ? 2.5 : 1.5;
+      // Scale up — 3× for small images (better header detection)
+      const SCALE = img.width < 1200 ? 3.0 : img.width < 2000 ? 2.5 : 1.5;
       const W = Math.round(img.width  * SCALE);
       const H = Math.round(img.height * SCALE);
 
@@ -51,24 +51,26 @@ async function preprocessImage(file) {
       const n = d.length;
 
       // ── 0. Color-aware normalisation ──────────────────────────────────────
-      // Handles white text on colored backgrounds (e.g. red/dark column headers).
-      // For each pixel: if R channel significantly dominates G and B (colored bg),
-      // use the minimum channel (ink proxy) and invert so white text → black ink.
-      for (let i = 0; i < n; i += 4) {
+      // For colored-background pixels (e.g. red column headers with white text):
+      // use min(R,G,B) for dark-text regions, and 255-max(R,G,B) for colored-bg
+      // pixels so that white-on-red → dark-on-light, readable by Tesseract.
+      // Also track which pixels were colored so we can skip shadow removal there.
+      const isColored = new Uint8Array(W * H); // 1 = was a saturated colored bg pixel
+      for (let i = 0, p = 0; i < n; i += 4, p++) {
         const r = d[i], g = d[i+1], b = d[i+2];
         const minCh = Math.min(r, g, b);
         const maxCh = Math.max(r, g, b);
-        const saturation = maxCh - minCh;
-        // Saturated pixel = colored background (sat > 60 and not near-white)
-        if (saturation > 60 && maxCh < 240) {
-          // White text on color: brightness is high → map to black (dark ink)
-          // Dark text on color: brightness is low → map to white (no ink)
-          const brightness = Math.round(0.299*r + 0.587*g + 0.114*b);
-          // Invert: high brightness (white text) → dark; low brightness (dark bg) → white
-          const ink = 255 - brightness;
-          d[i] = d[i+1] = d[i+2] = Math.max(0, Math.min(255, ink));
+        if (maxCh - minCh > 60 && maxCh < 245) {
+          // Saturated pixel: colored background (red, blue, green header, etc.)
+          // Map to grayscale using min channel: dark ink on any bg stays dark.
+          // For the bg itself: min-channel will be low (e.g. red bg: min~45 → dark).
+          // For white text on colored bg: min~255 → stays white.
+          // This gives white-on-dark which Tesseract can read after we invert below.
+          const v = 255 - maxCh; // invert the dominant channel: colored bg → near-black
+          d[i] = d[i+1] = d[i+2] = v;
+          isColored[p] = 1;
         }
-        // else: normal light background, leave as-is for standard grayscale
+        // else: leave normal light-bg pixels unchanged for standard grayscale
       }
 
       // ── 1. Grayscale (luminance-weighted) ──────────────────────────────────
@@ -103,6 +105,7 @@ async function preprocessImage(file) {
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
           const p = y*W+x;
+          if (isColored[p]) continue; // skip shadow removal for colored-bg pixels — they are already contrast-corrected
           const v = Math.round(gray[p] - bgInterp(x,y) + 200);
           gray[p] = Math.max(0, Math.min(255, v));
         }
@@ -351,6 +354,48 @@ function buildTable(words, text) {
 // ─────────────────────────────────────────────────────────────────────────────
 // PUBLIC: processImages
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// GEMINI VISION FALLBACK
+// ─────────────────────────────────────────────────────────────────────────────
+async function extractWithGemini(file) {
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch("/api/gemini-extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: base64, mimeType: file.type || "image/png" })
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.columns || !data.rows) return null;
+
+    const rows = data.rows.map(r => ({
+      id: crypto.randomUUID(),
+      label: r.label || "",
+      section: "General",
+      note: r.note || null,
+      is_bold: !!r.is_bold,
+      row_type: r.row_type || "line_item",
+      values: r.values || [],
+      amount: (r.values || []).filter(v => v !== null)[0] ?? 0,
+      level: 1,
+      confidence: 0.95,
+      issues: []
+    }));
+
+    return { columns: data.columns, rows };
+  } catch {
+    return null;
+  }
+}
+
 export async function processImages(files, onProgress) {
   const worker = await createWorker("eng", 1, {
     logger: m => { if(m.status==="recognizing text") onProgress?.(Math.round(m.progress*100)); }
@@ -372,7 +417,13 @@ export async function processImages(files, onProgress) {
       if(td&&td.rows.length>0) {
         all.push({id:crypto.randomUUID(),statement_type:stmtType(text),unit:extractUnit(text)||"Figures in Rs. Crores",rows:td.rows,tableData:td});
       } else {
-        throw new Error("Could not detect a financial table. Ensure the screenshot includes the full header row with column years.");
+        // OCR failed — fallback to Gemini Vision
+        const geminiResult = await extractWithGemini(file);
+        if(geminiResult&&geminiResult.rows&&geminiResult.rows.length>0) {
+          all.push({id:crypto.randomUUID(),statement_type:stmtType(geminiResult.rows.map(r=>r.label).join(" ")),unit:"Figures in Rs. Lacs",rows:geminiResult.rows,tableData:geminiResult});
+        } else {
+          throw new Error("Could not detect a financial table. Ensure the screenshot includes the full header row with column years.");
+        }
       }
     } finally {
       URL.revokeObjectURL(url);
