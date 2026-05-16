@@ -366,12 +366,15 @@ async function extractWithGemini(file) {
       reader.readAsDataURL(file);
     });
 
-    const res = await fetch("/api/gemini-extract", {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 25000);
+    const res = await fetch("/api/gemini-extract", { signal: ctrl.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image: base64, mimeType: file.type || "image/png" })
     });
 
+    clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.columns || !data.rows) return null;
