@@ -635,7 +635,17 @@ async function runConversionChecks(files, setChecks) {
   setChecks((current) => ({
     ...current,
     worker: { ...current.worker, ...(diagnostics.conversionJobs ? checkPass(diagnostics.message || "Conversion worker is available.") : checkFail(diagnostics.message || "Conversion worker is not available.")) },
-    gemini: { ...current.gemini, ...(diagnostics.geminiConfigured ? checkPass("Gemini API key is configured.") : checkWarn("Gemini key is not configured; fallback reconstruction may be used.")) },
+    gemini: { ...current.gemini, ...(
+      diagnostics.geminiConfigured
+        ? checkPass(diagnostics.message || "Gemini API key is working.")
+        : diagnostics.geminiStatus === "invalid_key"
+          ? checkFail("Gemini key is invalid or has no API access. Check Google Cloud Console.")
+          : diagnostics.geminiStatus === "rate_limit"
+            ? checkWarn("Gemini key works but is currently rate-limited.")
+            : diagnostics.geminiStatus === "no_models_available"
+              ? checkFail("Gemini key present but no models accessible. Enable Gemini API in Google Cloud.")
+              : checkWarn("Gemini key not configured; running in OCR-only mode.")
+    ) },
     ocr: { ...current.ocr, ...(diagnostics.ocrAvailable ? checkPass("OCR runtime is available.") : checkWarn("OCR runtime is missing or unavailable; fallback OCR path may be used.")) }
   }));
   return diagnostics;
