@@ -6,6 +6,8 @@ import * as XLSX from "xlsx";
 // ─────────────────────────────────────────────────────────────────────────────
 const MONTH_RE = /^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)$/i;
 const YEAR_RE  = /^\d{4}$/;
+// Matches standalone years (2020-2030) or bare 2-digit fiscal years (24, 25 etc.)
+const BARE_YEAR_RE = /^(20[0-9]{2}|19[0-9]{2}|[0-9]{2})$/;
 
 const TOTAL_KW = ["total","net profit","gross profit","operating profit",
   "profit before tax","profit after tax","ebitda","net income","net loss","profit before"];
@@ -185,7 +187,7 @@ const extractUnit = txt => { const m = txt.match(/(?:Consolidated )?Figures in R
 // ─────────────────────────────────────────────────────────────────────────────
 // TABLE RECONSTRUCTION
 // ─────────────────────────────────────────────────────────────────────────────
-function toRows(words, yTol=10) {
+function toRows(words, yTol=14) {
   const rows=[];
   for(const w of [...words].sort((a,b)=>a.bbox.y0-b.bbox.y0)) {
     const cy=(w.bbox.y0+w.bbox.y1)/2;
@@ -197,73 +199,104 @@ function toRows(words, yTol=10) {
   return rows;
 }
 
-function detectCols(rows) {
-  for(let ri=0;ri<rows.length;ri++) {
-    const ws=rows[ri].words;
-    if(!ws.some(w=>MONTH_RE.test(w.text))) continue;
+// Merge two consecutive OCR rows into one word list (handles split multi-line headers)
+function mergeAdjacentRows(rows, ri) {
+  if (ri+1 >= rows.length) return rows[ri].words;
+  return [...rows[ri].words, ...rows[ri+1].words].sort((a,b)=>a.bbox.x0-b.bbox.x0);
+}
 
-    const cols=[];
-    // Detect Note column X position from header row
-    let noteX=null;
-    for(let i=0;i<ws.length;i++) {
-      if(/^note$/i.test(ws[i].text)) {
-        noteX=(ws[i].bbox.x0+ws[i].bbox.x1)/2;
-      } else if(/^no\.?$/i.test(ws[i].text)&&i>0&&/^note$/i.test(ws[i-1].text)) {
-        noteX=(ws[i-1].bbox.x0+ws[i].bbox.x1)/2;
-      }
+function extractColsFromWords(ws) {
+  const cols = [];
+  let noteX = null;
+
+  // Detect "Note" / "Note No." column X
+  for (let i = 0; i < ws.length; i++) {
+    if (/^note$/i.test(ws[i].text)) {
+      noteX = (ws[i].bbox.x0 + ws[i].bbox.x1) / 2;
+    } else if (/^no\.?$/i.test(ws[i].text) && i > 0 && /^note$/i.test(ws[i-1]?.text)) {
+      noteX = (ws[i-1].bbox.x0 + ws[i].bbox.x1) / 2;
     }
-
-    for(let i=0;i<ws.length;i++) {
-      if(MONTH_RE.test(ws[i].text)) {
-        // "Month YYYY" — 2-token (e.g. "Mar 2024")
-        if(ws[i+1]&&YEAR_RE.test(ws[i+1].text)) {
-          cols.push({header:`${ws[i].text} ${ws[i+1].text}`,cx:(ws[i].bbox.x0+ws[i+1].bbox.x1)/2});
-          i++;
-        }
-        // "Month DD[,] YYYY" — 3-token (e.g. "March 31, 2025") — day may have trailing comma
-        else if(ws[i+1]&&ws[i+2]&&YEAR_RE.test(ws[i+2].text.replace(/[,.]$/,""))) {
-          const yearText=ws[i+2].text.replace(/[,.]$/,"");
-          cols.push({header:`${ws[i].text} ${yearText}`,cx:(ws[i].bbox.x0+ws[i+2].bbox.x1)/2});
-          i+=2;
-        }
-        // "Month DD , YYYY" — 4-token (OCR splits comma separately)
-        else if(ws[i+1]&&ws[i+2]&&ws[i+3]&&YEAR_RE.test(ws[i+3].text.replace(/[,.]$/,""))) {
-          const yearText=ws[i+3].text.replace(/[,.]$/,"");
-          cols.push({header:`${ws[i].text} ${yearText}`,cx:(ws[i].bbox.x0+ws[i+3].bbox.x1)/2});
-          i+=3;
-        }
-        // bare "Month" with no year following — skip (will be caught by bare-year logic below)
-        else { /* month token without year, skip */ }
-      } else if(cols.length > 0 && YEAR_RE.test(ws[i].text.replace(/[,.]$/,""))) {
-          // Bare year after a column header — inherit month from last col (e.g. "March 31, 2025  2024")
-          const lastMonth = cols[cols.length-1].header.split(" ")[0];
-          const yearText = ws[i].text.replace(/[,.]$/,"");
-          const expectedCx = cols[cols.length-1].cx + (cols.length > 1 ? cols[cols.length-1].cx - cols[cols.length-2].cx : 150);
-          cols.push({header:`${lastMonth} ${yearText}`, cx: (ws[i].bbox.x0+ws[i].bbox.x1)/2});
-      } else if(/^T+M[.,:]?$|^(TTM|LTM)$/i.test(ws[i].text.trim())) {
-        // catches TTM, TIM, TTW etc. (OCR misreads), also LTM
-        cols.push({header:"TTM",cx:(ws[i].bbox.x0+ws[i].bbox.x1)/2});
-      }
-    }
-
-    if(cols.length<2) continue;
-
-    // Only add TTM if there's explicit evidence (don't extrapolate for Balance Sheets etc.)
-    if(!cols.find(c=>c.header==="TTM")) {
-      const spacing=(cols[cols.length-1].cx-cols[0].cx)/Math.max(cols.length-1,1);
-      const extraWords=ws.filter(w=>{
-        const cx=(w.bbox.x0+w.bbox.x1)/2;
-        return cx>cols[cols.length-1].cx+spacing*0.4 && w.text.trim().length>0;
-      });
-      // Only add TTM if the extra word explicitly looks like a TTM header
-      const ttmWord=extraWords.find(w=>/^(TTM|LTM|T\.T\.M\.?|9M|6M|3M)$/i.test(w.text.trim()));
-      if(ttmWord) {
-        cols.push({header:"TTM",cx:(ttmWord.bbox.x0+ttmWord.bbox.x1)/2});
-      }
-    }
-
-    return {hri:ri,cols,noteX};
   }
+
+  for (let i = 0; i < ws.length; i++) {
+    const t = ws[i].text;
+    if (MONTH_RE.test(t)) {
+      const n1 = ws[i+1]?.text || "", n2 = ws[i+2]?.text || "", n3 = ws[i+3]?.text || "";
+      // "Mar 2024"
+      if (YEAR_RE.test(n1)) {
+        cols.push({ header: `${t} ${n1}`, cx: (ws[i].bbox.x0 + ws[i+1].bbox.x1) / 2 });
+        i += 1;
+      // "March 31, 2025" or "March 31 2025"
+      } else if (YEAR_RE.test(n2.replace(/[,.]$/, ""))) {
+        cols.push({ header: `${t} ${n2.replace(/[,.]$/, "")}`, cx: (ws[i].bbox.x0 + ws[i+2].bbox.x1) / 2 });
+        i += 2;
+      // "March 31 , 2025" (comma as separate token)
+      } else if (YEAR_RE.test(n3.replace(/[,.]$/, ""))) {
+        cols.push({ header: `${t} ${n3.replace(/[,.]$/, "")}`, cx: (ws[i].bbox.x0 + ws[i+3].bbox.x1) / 2 });
+        i += 3;
+      }
+      // bare month — skip
+    } else if (/^(TTM|LTM|T\.T\.M\.?)$/i.test(t) || /^T+M[.,:]?$/.test(t)) {
+      cols.push({ header: "TTM", cx: (ws[i].bbox.x0 + ws[i].bbox.x1) / 2 });
+    } else if (cols.length > 0 && YEAR_RE.test(t.replace(/[,.]$/, ""))) {
+      // Bare year after a column already found — inherit month from last col
+      const lastMonth = cols[cols.length-1].header.split(" ")[0];
+      cols.push({ header: `${lastMonth} ${t.replace(/[,.]$/, "")}`, cx: (ws[i].bbox.x0 + ws[i].bbox.x1) / 2 });
+    }
+  }
+  return { cols, noteX };
+}
+
+function detectCols(rows) {
+  for (let ri = 0; ri < rows.length; ri++) {
+    // Try single row first, then merged with next row (handles "As at\nMarch 31, 2025" split)
+    const candidates = [rows[ri].words, mergeAdjacentRows(rows, ri)];
+    for (const ws of candidates) {
+      if (!ws.some(w => MONTH_RE.test(w.text))) continue;
+      const { cols, noteX } = extractColsFromWords(ws);
+      if (cols.length < 2) continue;
+
+      // TTM column: only add if explicitly present
+      if (!cols.find(c => c.header === "TTM")) {
+        const spacing = (cols[cols.length-1].cx - cols[0].cx) / Math.max(cols.length-1, 1);
+        const ttmWord = ws.find(w => {
+          const cx = (w.bbox.x0 + w.bbox.x1) / 2;
+          return cx > cols[cols.length-1].cx + spacing * 0.4 &&
+            /^(TTM|LTM|T\.T\.M\.?|9M|6M|3M)$/i.test(w.text.trim());
+        });
+        if (ttmWord) cols.push({ header: "TTM", cx: (ttmWord.bbox.x0 + ttmWord.bbox.x1) / 2 });
+      }
+
+      return { hri: ri, cols, noteX };
+    }
+  }
+
+  // Last resort: scan for bare years like "2025  2024" in any row (some PDFs have no month)
+  for (let ri = 0; ri < rows.length; ri++) {
+    const ws = rows[ri].words;
+    const yearWords = ws.filter(w => YEAR_RE.test(w.text.replace(/[,.]$/, "")));
+    if (yearWords.length >= 2) {
+      // Verify they look like financial years (reasonable range)
+      const years = yearWords.map(w => parseInt(w.text));
+      if (years.every(y => y >= 1990 && y <= 2035) && Math.max(...years) - Math.min(...years) <= 10) {
+        const cols = yearWords.map(w => ({
+          header: w.text.replace(/[,.]$/, ""),
+          cx: (w.bbox.x0 + w.bbox.x1) / 2
+        }));
+        // Detect noteX from same or surrounding rows
+        const noteXFallback = (() => {
+          for (let r2 = Math.max(0,ri-2); r2 <= Math.min(rows.length-1, ri+2); r2++) {
+            for (let i = 0; i < rows[r2].words.length; i++) {
+              if (/^note$/i.test(rows[r2].words[i].text)) return (rows[r2].words[i].bbox.x0 + rows[r2].words[i].bbox.x1) / 2;
+            }
+          }
+          return null;
+        })();
+        return { hri: ri, cols, noteX: noteXFallback };
+      }
+    }
+  }
+
   return null;
 }
 
