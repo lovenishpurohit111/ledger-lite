@@ -80,10 +80,11 @@ async function preprocessImage(file) {
           const i = p * 4;
           const r = d[i], g = d[i+1], b = d[i+2];
           if (rowIsColored[y]) {
-            // Invert: white text (high lum) → near-black, colored bg → light gray
+            // Threshold: bright pixels (white text) → black ink; dark pixels (colored bg) → white paper
+            // lum>160 = white/light text → 0 (black); else = dark/colored bg → 255 (white)
             const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-            const inv = 255 - lum;
-            d[i] = d[i+1] = d[i+2] = inv;
+            const v = lum > 160 ? 0 : 255;
+            d[i] = d[i+1] = d[i+2] = v;
             isColored[p] = 1;
           }
           // else: leave normal light-bg pixels unchanged
