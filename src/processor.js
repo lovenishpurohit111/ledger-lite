@@ -377,22 +377,32 @@ async function extractWithGemini(file) {
 {"columns":["Mar 2025","Mar 2024"],"rows":[{"label":"NON-CURRENT ASSETS","note":null,"values":[null,null],"is_bold":true,"row_type":"header"},{"label":"Property, Plant & Equipment","note":"1","values":[40563.52,34436.76],"is_bold":false,"row_type":"line_item"}]}
 Rules: columns=year headers; note=note number string or null; values=numbers per column (null if blank, no commas); is_bold=true for ALL-CAPS headers/totals/subtotals; row_type=header|total|subtotal|line_item. Include ALL rows.`;
 
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 30000);
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-      {
-        signal: ctrl.signal,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type || "image/png", data: base64 } }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 8192 },
-        }),
-      }
-    );
-    clearTimeout(timeout);
-    if (!r.ok) return null;
+    // Retry up to 3 times with backoff on 429
+    let r, lastStatus;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(res => setTimeout(res, attempt * 3000));
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 30000);
+      r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          signal: ctrl.signal,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type || "image/png", data: base64 } }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+          }),
+        }
+      );
+      clearTimeout(timeout);
+      lastStatus = r.status;
+      if (r.status !== 429) break;
+    }
+    if (!r.ok) {
+      if (lastStatus === 429) throw new Error("Gemini rate limit hit. Please wait a moment and try again.");
+      return null;
+    }
     const data = await r.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -410,6 +420,7 @@ Rules: columns=year headers; note=note number string or null; values=numbers per
     };
   } catch(e) {
     console.error("[Gemini fallback error]", e);
+    if (e.message.includes("rate limit")) throw e;
     return null;
   }
 }
