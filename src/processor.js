@@ -365,12 +365,24 @@ function buildTable(words, text) {
 // ─────────────────────────────────────────────────────────────────────────────
 // GEMINI VISION FALLBACK
 // ─────────────────────────────────────────────────────────────────────────────
+// Model chain per CLAUDE.md: gemini-2.5-flash-lite → gemini-1.5-flash → gemini-1.5-flash-8b
+const GEMINI_MODELS = [
+  "gemini-2.5-flash-lite-preview-06-17",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b"
+];
+
 async function extractWithGemini(file) {
   try {
-    // Get Gemini key from config endpoint
-    const cfgRes = await fetch("/api/config");
-    if (!cfgRes.ok) return null;
-    const { geminiKey } = await cfgRes.json();
+    // Get Gemini key from config endpoint — no key = silently skip
+    let geminiKey = null;
+    try {
+      const cfgRes = await fetch("/api/config");
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        geminiKey = cfg?.geminiKey || null;
+      }
+    } catch { /* config endpoint unavailable — that's fine */ }
     if (!geminiKey) return null;
 
     // Convert file to base64
@@ -385,50 +397,62 @@ async function extractWithGemini(file) {
 {"columns":["Mar 2025","Mar 2024"],"rows":[{"label":"NON-CURRENT ASSETS","note":null,"values":[null,null],"is_bold":true,"row_type":"header"},{"label":"Property, Plant & Equipment","note":"1","values":[40563.52,34436.76],"is_bold":false,"row_type":"line_item"}]}
 Rules: columns=year headers; note=note number string or null; values=numbers per column (null if blank, no commas); is_bold=true for ALL-CAPS headers/totals/subtotals; row_type=header|total|subtotal|line_item. Include ALL rows.`;
 
-    // Retry up to 3 times with backoff on 429
-    let r, lastStatus;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise(res => setTimeout(res, attempt * 3000));
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 30000);
-      r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {
-          signal: ctrl.signal,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type || "image/png", data: base64 } }] }],
-            generationConfig: { temperature: 0, maxOutputTokens: 8192 },
-          }),
-        }
-      );
-      clearTimeout(timeout);
-      lastStatus = r.status;
-      if (r.status !== 429) break;
-    }
-    if (!r.ok) {
-      if (lastStatus === 429) throw new Error("Gemini rate limit hit. Please wait a moment and try again.");
-      return null;
-    }
-    const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed = JSON.parse(clean);
-    if (!parsed.columns || !parsed.rows) return null;
+    // Try each model in chain; skip to next on 429/404/model errors
+    for (const model of GEMINI_MODELS) {
+      let r, succeeded = false;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) await new Promise(res => setTimeout(res, 3000));
+        try {
+          const ctrl = new AbortController();
+          const timeout = setTimeout(() => ctrl.abort(), 30000);
+          r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+            {
+              signal: ctrl.signal,
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: file.type || "image/png", data: base64 } }] }],
+                generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+              }),
+            }
+          );
+          clearTimeout(timeout);
+        } catch { /* timeout or network — try next model */ break; }
 
-    return {
-      columns: parsed.columns,
-      rows: parsed.rows.map(r => ({
-        id: crypto.randomUUID(), label: r.label || "", section: "General",
-        note: r.note || null, is_bold: !!r.is_bold, row_type: r.row_type || "line_item",
-        values: r.values || [], amount: (r.values||[]).find(v=>v!==null)??0,
-        level: 1, confidence: 0.95, issues: []
-      }))
-    };
+        if (r.status === 429) continue;        // retry same model once
+        if (r.status === 400 || r.status === 403 || r.status === 404) break; // bad key or model gone — skip model
+        if (r.ok) { succeeded = true; break; }
+        break; // other error — skip model
+      }
+
+      if (!succeeded || !r?.ok) continue; // move to next model
+
+      try {
+        const data = await r.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+        const parsed = JSON.parse(clean);
+        if (!parsed.columns || !parsed.rows) continue; // bad JSON shape — try next model
+
+        return {
+          columns: parsed.columns,
+          rows: parsed.rows.map(row => ({
+            id: crypto.randomUUID(), label: row.label || "", section: "General",
+            note: row.note || null, is_bold: !!row.is_bold, row_type: row.row_type || "line_item",
+            values: row.values || [], amount: (row.values||[]).find(v=>v!==null)??0,
+            level: 1, confidence: 0.95, issues: []
+          }))
+        };
+      } catch { continue; } // JSON parse error — try next model
+    }
+
+    // All models exhausted — silently return null so OCR result is used
+    console.warn("[Gemini fallback] All models failed or rate-limited — using OCR result.");
+    return null;
   } catch(e) {
-    console.error("[Gemini fallback error]", e);
-    if (e.message.includes("rate limit")) throw e;
+    // Any unexpected error must never surface to the user — OCR result wins
+    console.warn("[Gemini fallback] Unexpected error:", e);
     return null;
   }
 }
@@ -452,9 +476,10 @@ export async function processImages(files, onProgress) {
       const td    = words.length ? buildTable(words,text) : null;
 
       if(td&&td.rows.length>0) {
+        // OCR succeeded — use result directly, no Gemini needed
         all.push({id:crypto.randomUUID(),statement_type:stmtType(text),unit:extractUnit(text)||"Figures in Rs. Crores",rows:td.rows,tableData:td});
       } else {
-        // OCR failed — fallback to Gemini Vision
+        // OCR returned no rows — try Gemini Vision as fallback (silently skipped if no key or rate-limited)
         const geminiResult = await extractWithGemini(file);
         if(geminiResult&&geminiResult.rows&&geminiResult.rows.length>0) {
           all.push({id:crypto.randomUUID(),statement_type:stmtType(geminiResult.rows.map(r=>r.label).join(" ")),unit:"Figures in Rs. Lacs",rows:geminiResult.rows,tableData:geminiResult});
